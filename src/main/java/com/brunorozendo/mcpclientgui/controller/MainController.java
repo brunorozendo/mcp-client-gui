@@ -64,6 +64,9 @@ public class MainController implements Initializable {
 
     @FXML
     private Label statusLabel;
+    
+    @FXML
+    private ComboBox<String> modelComboBox;
 
     private ObservableList<Chat> chats = FXCollections.observableArrayList();
     private Chat currentChat;
@@ -78,6 +81,12 @@ public class MainController implements Initializable {
     private OllamaApiClient ollamaApiClient;
     private GuiChatController chatController;
     private boolean isInitialized = false;
+    private String currentChatControllerModel = null;
+    
+    // MCP data cached for creating chat controllers
+    private List<McpSchema.Tool> allMcpTools;
+    private List<McpSchema.Resource> allMcpResources;
+    private List<McpSchema.Prompt> allMcpPrompts;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -90,6 +99,7 @@ public class MainController implements Initializable {
         setupChatList();
         setupMessageList();
         setupMessageInput();
+        setupModelComboBox();
         loadChatsFromDatabase();
 
         // Auto-initialize if settings are valid
@@ -155,10 +165,81 @@ public class MainController implements Initializable {
         messageInput.setDisable(true);
         sendButton.setDisable(true);
     }
+    
+    private void setupModelComboBox() {
+        // Set placeholder text
+        modelComboBox.setPromptText("Select a model");
+        
+        // Populate with available models
+        updateModelComboBox();
+        
+        // Initially disable until a chat is selected
+        modelComboBox.setDisable(true);
+        
+        // Handle model selection changes
+        modelComboBox.setOnAction(e -> handleModelChange());
+    }
+    
+    private void updateModelComboBox() {
+        // Store current selection
+        String currentSelection = modelComboBox.getValue();
+        
+        // Clear and repopulate
+        modelComboBox.getItems().clear();
+        
+        // Add all available models
+        for (AppSettings.LlmModel model : appSettings.getLlmModels()) {
+            modelComboBox.getItems().add(model.getName());
+        }
+        
+        // Restore selection if it still exists
+        if (currentSelection != null && modelComboBox.getItems().contains(currentSelection)) {
+            modelComboBox.setValue(currentSelection);
+        }
+    }
+    
+    private void handleModelChange() {
+        if (currentChat == null || modelComboBox.getValue() == null) {
+            return;
+        }
+        
+        String newModel = modelComboBox.getValue();
+        String oldModel = currentChat.getLlmModelName();
+        
+        // Only update if the model actually changed
+        if (!newModel.equals(oldModel)) {
+            // Update the chat's model
+            currentChat.setLlmModelName(newModel);
+            
+            // Save to database
+            databaseService.saveChat(currentChat);
+            
+            // Update the title
+            titleLabel.setText("MCP Assistant - " + currentChat.getName());
+            
+            // Refresh the chat list to show the updated model
+            chatListView.refresh();
+            
+            // Create new chat controller for the new model
+            if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
+                createChatControllerForModel(newModel);
+                
+                // Show status update
+                updateStatusLabel("Switched to model: " + newModel);
+            }
+        }
+    }
 
     @FXML
     private void handleNewChat() {
-        Chat newChat = new Chat("Chat " + (chats.size() + 1));
+        // Get default model from settings
+        String defaultModelName = appSettings.getDefaultLlmModelName();
+        if (defaultModelName == null || defaultModelName.isEmpty()) {
+            showNotConfiguredAlert();
+            return;
+        }
+        
+        Chat newChat = new Chat("Chat " + (chats.size() + 1), defaultModelName);
 
         // Save to database
         newChat = databaseService.saveChat(newChat);
@@ -192,18 +273,23 @@ public class MainController implements Initializable {
             Platform.runLater(() -> messageListView.scrollTo(currentChat.getMessages().size() - 1));
 
             // Process with chat controller if initialized
-            if (chatController != null && isInitialized) {
-                // Disable input during processing
-                messageInput.setDisable(true);
-                sendButton.setDisable(true);
+            if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
+                // Ensure chat controller is using the correct model for this chat
+                ensureChatControllerForCurrentChat();
+                
+                if (chatController != null) {
+                    // Disable input during processing
+                    messageInput.setDisable(true);
+                    sendButton.setDisable(true);
 
-                chatController.processUserMessage(text).whenComplete((result, throwable) -> {
-                    Platform.runLater(() -> {
-                        messageInput.setDisable(false);
-                        sendButton.setDisable(false);
-                        messageInput.requestFocus();
+                    chatController.processUserMessage(text).whenComplete((result, throwable) -> {
+                        Platform.runLater(() -> {
+                            messageInput.setDisable(false);
+                            sendButton.setDisable(false);
+                            messageInput.requestFocus();
+                        });
                     });
-                });
+                }
             }
         }
     }
@@ -229,6 +315,13 @@ public class MainController implements Initializable {
             settingsStage.showAndWait();
 
             if (settingsController.isSaved()) {
+                // Reload settings to get updated models
+                appSettings = databaseService.loadSettings();
+                
+                // Update the model ComboBox with new models
+                updateModelComboBox();
+                
+                // Re-initialize MCP and AI
                 initializeMcpAndAI();
             }
 
@@ -258,7 +351,6 @@ public class MainController implements Initializable {
                 mcpConnectionManager.initializeClients(mcpConfig);
 
                 // 3. Initialize Ollama API Client
-                String ollamaModelName = parseOllamaModelName(appSettings.getLlmModel());
                 ollamaApiClient = new OllamaApiClient(appSettings.getOllamaBaseUrl());
 
                 // 4. Fetch all capabilities from MCP servers
@@ -266,23 +358,10 @@ public class MainController implements Initializable {
                 List<McpSchema.Resource> allMcpResources = mcpConnectionManager.getAllResources();
                 List<McpSchema.Prompt> allMcpPrompts = mcpConnectionManager.getAllPrompts();
 
-                // 5. Prepare for the LLM: Convert MCP tools to Ollama format and build a system prompt
-                List<OllamaApi.Tool> ollamaTools = SchemaConverter.convertMcpToolsToOllamaTools(allMcpTools);
-                String systemPrompt = SystemPromptBuilder.build(allMcpTools, allMcpResources, allMcpPrompts);
-
-                // 6. Initialize GUI Chat Controller
-                chatController = new GuiChatController(
-                        ollamaModelName,
-                        ollamaApiClient,
-                        mcpConnectionManager,
-                        systemPrompt,
-                        ollamaTools
-                );
-
-                // Set up callbacks for GUI updates
-                chatController.setOnMessageReceived(this::onAIMessageReceived);
-                chatController.setOnThinking(this::onThinking);
-                chatController.setOnThinkingFinished(this::onThinkingFinished);
+                // Store MCP data for later use
+                this.allMcpTools = allMcpTools;
+                this.allMcpResources = allMcpResources;
+                this.allMcpPrompts = allMcpPrompts;
 
                 Platform.runLater(() -> {
                     isInitialized = true;
@@ -328,6 +407,53 @@ public class MainController implements Initializable {
         }
         return llmModelString;
     }
+    
+    private void ensureChatControllerForCurrentChat() {
+        if (currentChat == null || currentChat.getLlmModelName() == null) {
+            return;
+        }
+        
+        String chatModel = currentChat.getLlmModelName();
+        
+        // Check if we need to create a new chat controller or if the current one matches
+        if (chatController == null || !chatModel.equals(currentChatControllerModel)) {
+            createChatControllerForModel(chatModel);
+        }
+    }
+    
+    private void createChatControllerForModel(String modelName) {
+        if (ollamaApiClient == null || mcpConnectionManager == null || allMcpTools == null) {
+            return;
+        }
+        
+        try {
+            // Prepare for the LLM: Convert MCP tools to Ollama format and build a system prompt
+            List<OllamaApi.Tool> ollamaTools = SchemaConverter.convertMcpToolsToOllamaTools(allMcpTools);
+            String systemPrompt = SystemPromptBuilder.build(allMcpTools, allMcpResources, allMcpPrompts);
+
+            // Create new chat controller with the specified model
+            String ollamaModelName = parseOllamaModelName(modelName);
+            chatController = new GuiChatController(
+                    ollamaModelName,
+                    ollamaApiClient,
+                    mcpConnectionManager,
+                    systemPrompt,
+                    ollamaTools
+            );
+
+            // Set up callbacks for GUI updates
+            chatController.setOnMessageReceived(this::onAIMessageReceived);
+            chatController.setOnThinking(this::onThinking);
+            chatController.setOnThinkingFinished(this::onThinkingFinished);
+            
+            currentChatControllerModel = modelName;
+            
+            logger.info("Created chat controller for model: " + modelName);
+        } catch (Exception e) {
+            logger.error("Error creating chat controller for model: " + modelName, e);
+            showErrorAlert("Model Error", "Failed to initialize model " + modelName + ": " + e.getMessage());
+        }
+    }
 
     private void updateStatusLabel(String status) {
         if (statusLabel != null) {
@@ -362,6 +488,10 @@ public class MainController implements Initializable {
         }
 
         messageListView.setItems(chat.getMessages());
+        
+        // Update model ComboBox
+        modelComboBox.setDisable(false);
+        modelComboBox.setValue(chat.getLlmModelName());
 
         // Scroll to bottom
         Platform.runLater(() -> {
@@ -370,21 +500,42 @@ public class MainController implements Initializable {
             }
         });
 
-        // Clear chat controller history and reload if necessary
-        if (chatController != null) {
-            chatController.clearHistory();
-            // TODO: Rebuild chat history from messages if needed
+        // Ensure we have the right chat controller for this chat's model
+        if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
+            ensureChatControllerForCurrentChat();
+            
+            // Clear chat controller history
+            if (chatController != null) {
+                chatController.clearHistory();
+                // TODO: Rebuild chat history from messages if needed
+            }
         }
     }
 
     private void loadChatsFromDatabase() {
         // Load all chats from database
         List<Chat> savedChats = databaseService.getAllChats();
+        
+        // Handle migration: set default model for chats without a model
+        String defaultModelName = appSettings.getDefaultLlmModelName();
+        for (Chat chat : savedChats) {
+            if (chat.getLlmModelName() == null || chat.getLlmModelName().isEmpty()) {
+                if (defaultModelName != null && !defaultModelName.isEmpty()) {
+                    chat.setLlmModelName(defaultModelName);
+                    databaseService.saveChat(chat);
+                }
+            }
+        }
+        
         chats.addAll(savedChats);
 
         // If no chats exist, create a welcome chat
         if (chats.isEmpty()) {
-            Chat welcomeChat = new Chat("Welcome Chat");
+            if (defaultModelName == null || defaultModelName.isEmpty()) {
+                defaultModelName = "llama3.2"; // Fallback
+            }
+            
+            Chat welcomeChat = new Chat("Welcome Chat", defaultModelName);
             welcomeChat = databaseService.saveChat(welcomeChat);
 
             Message welcomeMessage = new Message("Welcome to MCP Client GUI! Configure your settings to get started.", false, LocalDateTime.now());
@@ -443,6 +594,8 @@ public class MainController implements Initializable {
                     currentChat = null;
                     messageListView.setItems(FXCollections.observableArrayList());
                     titleLabel.setText("MCP Assistant");
+                    modelComboBox.setValue(null);
+                    modelComboBox.setDisable(true);
                 }
 
                 // Select another chat if available
@@ -463,18 +616,30 @@ public class MainController implements Initializable {
                 setText(null);
                 setGraphic(null);
             } else {
-                HBox hbox = new HBox(10);
+                VBox vbox = new VBox(2);
+                vbox.setPadding(new Insets(8, 12, 8, 12));
+
+                HBox hbox = new HBox(8);
                 hbox.setAlignment(Pos.CENTER_LEFT);
-                hbox.setPadding(new Insets(8, 12, 8, 12));
 
                 Label icon = new Label("💬");
-                icon.setStyle("-fx-font-size: 20px;");
+                icon.setStyle("-fx-font-size: 18px;");
 
                 Label nameLabel = new Label(chat.getName());
                 nameLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: normal; -fx-text-fill: white;");
 
                 hbox.getChildren().addAll(icon, nameLabel);
-                setGraphic(hbox);
+                
+                // Add model label if available
+                if (chat.getLlmModelName() != null && !chat.getLlmModelName().isEmpty()) {
+                    Label modelLabel = new Label(chat.getLlmModelName());
+                    modelLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: rgba(255, 255, 255, 0.7); -fx-padding: 0 0 0 26;");
+                    vbox.getChildren().addAll(hbox, modelLabel);
+                } else {
+                    vbox.getChildren().add(hbox);
+                }
+                
+                setGraphic(vbox);
             }
         }
     }

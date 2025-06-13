@@ -5,7 +5,7 @@
 <?import javafx.scene.layout.*?>
 <?import javafx.scene.text.Font?>
 
-<VBox spacing="20.0" prefHeight="400.0" prefWidth="500.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.brunorozendo.mcpclientgui.controller.SettingsController">
+<VBox spacing="20.0" prefHeight="600.0" prefWidth="600.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.brunorozendo.mcpclientgui.controller.SettingsController">
    <children>
       <Label text="MCP Client GUI Settings" styleClass="settings-title">
          <font>
@@ -15,6 +15,35 @@
       
       <Separator />
       
+      <!-- LLM Models Section -->
+      <VBox spacing="10.0">
+         <children>
+            <Label text="LLM Models:" styleClass="section-title">
+               <font>
+                  <Font name="System Bold" size="14.0" />
+               </font>
+            </Label>
+            
+            <HBox spacing="10.0">
+               <children>
+                  <TextField fx:id="newModelField" promptText="Enter model name (e.g., llama3.2, qwen:7b)" HBox.hgrow="ALWAYS" />
+                  <Button fx:id="addModelButton" text="Add Model" onAction="#handleAddModel" />
+               </children>
+            </HBox>
+            
+            <TableView fx:id="modelsTable" prefHeight="200.0">
+               <columns>
+                  <TableColumn fx:id="modelNameColumn" text="Model Name" prefWidth="350.0" />
+                  <TableColumn fx:id="defaultColumn" text="Default" prefWidth="80.0" />
+                  <TableColumn fx:id="actionsColumn" text="Actions" prefWidth="120.0" />
+               </columns>
+            </TableView>
+         </children>
+      </VBox>
+      
+      <Separator />
+      
+      <!-- Other Settings -->
       <GridPane hgap="10.0" vgap="15.0">
          <columnConstraints>
             <ColumnConstraints halignment="RIGHT" hgrow="NEVER" minWidth="120.0" />
@@ -24,19 +53,15 @@
          <rowConstraints>
             <RowConstraints />
             <RowConstraints />
-            <RowConstraints />
          </rowConstraints>
          
          <children>
-            <Label text="LLM Model:" GridPane.columnIndex="0" GridPane.rowIndex="0" />
-            <TextField fx:id="llmModelField" promptText="e.g., llama3.2, qwen:7b" GridPane.columnIndex="1" GridPane.rowIndex="0" GridPane.columnSpan="2" />
+            <Label text="MCP Config File:" GridPane.columnIndex="0" GridPane.rowIndex="0" />
+            <TextField fx:id="mcpConfigPathField" promptText="Path to mcp.json file" GridPane.columnIndex="1" GridPane.rowIndex="0" />
+            <Button fx:id="browseMcpConfigButton" onAction="#handleBrowseMcpConfig" text="Browse..." GridPane.columnIndex="2" GridPane.rowIndex="0" />
             
-            <Label text="MCP Config File:" GridPane.columnIndex="0" GridPane.rowIndex="1" />
-            <TextField fx:id="mcpConfigPathField" promptText="Path to mcp.json file" GridPane.columnIndex="1" GridPane.rowIndex="1" />
-            <Button fx:id="browseMcpConfigButton" onAction="#handleBrowseMcpConfig" text="Browse..." GridPane.columnIndex="2" GridPane.rowIndex="1" />
-            
-            <Label text="Ollama Base URL:" GridPane.columnIndex="0" GridPane.rowIndex="2" />
-            <TextField fx:id="ollamaBaseUrlField" promptText="http://localhost:11434" GridPane.columnIndex="1" GridPane.rowIndex="2" GridPane.columnSpan="2" />
+            <Label text="Ollama Base URL:" GridPane.columnIndex="0" GridPane.rowIndex="1" />
+            <TextField fx:id="ollamaBaseUrlField" promptText="http://localhost:11434" GridPane.columnIndex="1" GridPane.rowIndex="1" GridPane.columnSpan="2" />
          </children>
       </GridPane>
       
@@ -49,7 +74,7 @@
                   <Font name="System Bold" size="14.0" />
                </font>
             </Label>
-            <Label text="• LLM Model: The name of the Ollama model to use (e.g., llama3.2, qwen:7b)" styleClass="help-text" wrapText="true" />
+            <Label text="• LLM Models: Add multiple Ollama models and set one as default for new chats" styleClass="help-text" wrapText="true" />
             <Label text="• MCP Config File: Path to your mcp.json configuration file that defines MCP servers" styleClass="help-text" wrapText="true" />
             <Label text="• Ollama Base URL: The URL where your Ollama instance is running" styleClass="help-text" wrapText="true" />
          </children>

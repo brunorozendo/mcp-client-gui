@@ -6,6 +6,7 @@ import javafx.collections.ObservableList;
 public class Chat {
     private Long id;
     private String name;
+    private String llmModelName;
     private ObservableList<Message> messages;
     
     public Chat(String name) {
@@ -13,9 +14,22 @@ public class Chat {
         this.messages = FXCollections.observableArrayList();
     }
     
+    public Chat(String name, String llmModelName) {
+        this.name = name;
+        this.llmModelName = llmModelName;
+        this.messages = FXCollections.observableArrayList();
+    }
+    
     public Chat(Long id, String name) {
         this.id = id;
         this.name = name;
+        this.messages = FXCollections.observableArrayList();
+    }
+    
+    public Chat(Long id, String name, String llmModelName) {
+        this.id = id;
+        this.name = name;
+        this.llmModelName = llmModelName;
         this.messages = FXCollections.observableArrayList();
     }
     
@@ -33,6 +47,14 @@ public class Chat {
     
     public void setName(String name) {
         this.name = name;
+    }
+    
+    public String getLlmModelName() {
+        return llmModelName;
+    }
+    
+    public void setLlmModelName(String llmModelName) {
+        this.llmModelName = llmModelName;
     }
     
     public ObservableList<Message> getMessages() {

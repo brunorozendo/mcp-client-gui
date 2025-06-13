@@ -32,14 +32,29 @@
    <center>
       <VBox spacing="0" styleClass="main-content">
          <children>
-            <Label fx:id="titleLabel" alignment="CENTER" maxWidth="Infinity" styleClass="main-title" text="MCP Assistant" VBox.vgrow="NEVER">
-               <font>
-                  <Font size="28.0" />
-               </font>
+            <VBox spacing="10.0" styleClass="header-area">
+               <children>
+                  <Label fx:id="titleLabel" alignment="CENTER" maxWidth="Infinity" styleClass="main-title" text="MCP Assistant" VBox.vgrow="NEVER">
+                     <font>
+                        <Font size="28.0" />
+                     </font>
+                  </Label>
+                  
+                  <HBox alignment="CENTER" spacing="10.0">
+                     <children>
+                        <Label text="Model:" styleClass="model-label">
+                           <font>
+                              <Font size="14.0" />
+                           </font>
+                        </Label>
+                        <ComboBox fx:id="modelComboBox" prefWidth="200.0" styleClass="model-combo" />
+                     </children>
+                  </HBox>
+               </children>
                <padding>
-                  <Insets bottom="20.0" top="20.0" />
+                  <Insets bottom="15.0" left="20.0" right="20.0" top="20.0" />
                </padding>
-            </Label>
+            </VBox>
             
             <ListView fx:id="messageListView" VBox.vgrow="ALWAYS" styleClass="message-list" />
             

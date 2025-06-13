@@ -2,14 +2,20 @@ package com.brunorozendo.mcpclientgui.controller;
 
 import com.brunorozendo.mcpclientgui.model.AppSettings;
 import com.brunorozendo.mcpclientgui.service.DatabaseService;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Button;
-import javafx.scene.control.TextField;
+import javafx.geometry.Pos;
+import javafx.scene.control.*;
+import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.HBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Controller for the Settings dialog.
@@ -17,7 +23,22 @@ import java.io.File;
 public class SettingsController {
 
     @FXML
-    private TextField llmModelField;
+    private TextField newModelField;
+    
+    @FXML
+    private Button addModelButton;
+    
+    @FXML
+    private TableView<ModelEntry> modelsTable;
+    
+    @FXML
+    private TableColumn<ModelEntry, String> modelNameColumn;
+    
+    @FXML
+    private TableColumn<ModelEntry, String> defaultColumn;
+    
+    @FXML
+    private TableColumn<ModelEntry, Void> actionsColumn;
     
     @FXML
     private TextField mcpConfigPathField;
@@ -38,6 +59,7 @@ public class SettingsController {
     private boolean saved = false;
     private Stage dialogStage;
     private DatabaseService databaseService = DatabaseService.getInstance();
+    private ObservableList<ModelEntry> modelsList = FXCollections.observableArrayList();
 
     public void setDialogStage(Stage dialogStage) {
         this.dialogStage = dialogStage;
@@ -56,14 +78,121 @@ public class SettingsController {
     private void initialize() {
         // Initialize default values
         ollamaBaseUrlField.setText("http://localhost:11434");
-        llmModelField.setText("llama3.2");
+        
+        // Setup table columns
+        modelNameColumn.setCellValueFactory(new PropertyValueFactory<>("name"));
+        defaultColumn.setCellValueFactory(cellData -> {
+            return new SimpleStringProperty(cellData.getValue().isDefault() ? "Yes" : "");
+        });
+        
+        // Setup actions column
+        actionsColumn.setCellFactory(column -> {
+            return new TableCell<ModelEntry, Void>() {
+                private final Button setDefaultButton = new Button("Set Default");
+                private final Button removeButton = new Button("Remove");
+                
+                {
+                    setDefaultButton.getStyleClass().add("small-button");
+                    removeButton.getStyleClass().add("small-button");
+                    removeButton.getStyleClass().add("danger-button");
+                }
+                
+                @Override
+                protected void updateItem(Void item, boolean empty) {
+                    super.updateItem(item, empty);
+                    if (empty) {
+                        setGraphic(null);
+                    } else {
+                        HBox buttons = new HBox(5);
+                        buttons.setAlignment(Pos.CENTER);
+                        
+                        ModelEntry model = getTableView().getItems().get(getIndex());
+                        
+                        setDefaultButton.setOnAction(e -> handleSetDefault(model));
+                        removeButton.setOnAction(e -> handleRemoveModel(model));
+                        
+                        // Disable "Set Default" if already default
+                        setDefaultButton.setDisable(model.isDefault());
+                        
+                        // Disable remove if it's the only model or is default
+                        removeButton.setDisable(modelsList.size() <= 1 || model.isDefault());
+                        
+                        buttons.getChildren().addAll(setDefaultButton, removeButton);
+                        setGraphic(buttons);
+                    }
+                }
+            };
+        });
+        
+        modelsTable.setItems(modelsList);
+        
+        // Enable add button only when text is entered
+        addModelButton.disableProperty().bind(newModelField.textProperty().isEmpty());
+        
+        // Add model on Enter key
+        newModelField.setOnAction(e -> handleAddModel());
     }
 
     private void updateFields() {
         if (settings != null) {
-            llmModelField.setText(settings.getLlmModel() != null ? settings.getLlmModel() : "");
+            // Populate models table
+            modelsList.clear();
+            for (AppSettings.LlmModel model : settings.getLlmModels()) {
+                modelsList.add(new ModelEntry(model.getName(), model.isDefault()));
+            }
+            
             mcpConfigPathField.setText(settings.getMcpConfigFile() != null ? settings.getMcpConfigFile().getAbsolutePath() : "");
             ollamaBaseUrlField.setText(settings.getOllamaBaseUrl() != null ? settings.getOllamaBaseUrl() : "http://localhost:11434");
+        }
+    }
+
+    @FXML
+    private void handleAddModel() {
+        String modelName = newModelField.getText().trim();
+        if (!modelName.isEmpty()) {
+            // Check if model already exists
+            boolean exists = modelsList.stream().anyMatch(m -> m.getName().equalsIgnoreCase(modelName));
+            if (exists) {
+                Alert alert = new Alert(Alert.AlertType.WARNING);
+                alert.setTitle("Duplicate Model");
+                alert.setHeaderText(null);
+                alert.setContentText("Model '" + modelName + "' already exists!");
+                alert.showAndWait();
+                return;
+            }
+            
+            // Add new model
+            boolean isFirstModel = modelsList.isEmpty();
+            ModelEntry newModel = new ModelEntry(modelName, isFirstModel);
+            modelsList.add(newModel);
+            
+            newModelField.clear();
+            newModelField.requestFocus();
+        }
+    }
+
+    private void handleSetDefault(ModelEntry model) {
+        // Unset all defaults
+        for (ModelEntry m : modelsList) {
+            m.setDefault(false);
+        }
+        // Set new default
+        model.setDefault(true);
+        modelsTable.refresh();
+    }
+
+    private void handleRemoveModel(ModelEntry model) {
+        if (modelsList.size() > 1 && !model.isDefault()) {
+            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+            confirmation.setTitle("Remove Model");
+            confirmation.setHeaderText(null);
+            confirmation.setContentText("Are you sure you want to remove '" + model.getName() + "'?");
+            
+            confirmation.showAndWait().ifPresent(response -> {
+                if (response == ButtonType.OK) {
+                    modelsList.remove(model);
+                }
+            });
         }
     }
 
@@ -91,8 +220,20 @@ public class SettingsController {
     @FXML
     private void handleSave() {
         if (validateInput()) {
-            // Update settings
-            settings.setLlmModel(llmModelField.getText().trim());
+            // Update settings with models
+            List<AppSettings.LlmModel> models = new ArrayList<>();
+            String defaultModelName = null;
+            
+            for (ModelEntry entry : modelsList) {
+                AppSettings.LlmModel model = new AppSettings.LlmModel(entry.getName(), entry.isDefault());
+                models.add(model);
+                if (model.isDefault()) {
+                    defaultModelName = model.getName();
+                }
+            }
+            
+            settings.setLlmModels(models);
+            settings.setDefaultLlmModelName(defaultModelName);
             settings.setOllamaBaseUrl(ollamaBaseUrlField.getText().trim());
             
             String mcpConfigPath = mcpConfigPathField.getText().trim();
@@ -123,8 +264,14 @@ public class SettingsController {
     private boolean validateInput() {
         StringBuilder errors = new StringBuilder();
 
-        if (llmModelField.getText().trim().isEmpty()) {
-            errors.append("- LLM Model is required\n");
+        if (modelsList.isEmpty()) {
+            errors.append("- At least one LLM model is required\n");
+        } else {
+            // Check if there's a default model
+            boolean hasDefault = modelsList.stream().anyMatch(ModelEntry::isDefault);
+            if (!hasDefault) {
+                errors.append("- One model must be set as default\n");
+            }
         }
 
         if (mcpConfigPathField.getText().trim().isEmpty()) {
@@ -150,5 +297,34 @@ public class SettingsController {
         }
 
         return true;
+    }
+    
+    /**
+     * Model entry for the table
+     */
+    public static class ModelEntry {
+        private String name;
+        private boolean isDefault;
+        
+        public ModelEntry(String name, boolean isDefault) {
+            this.name = name;
+            this.isDefault = isDefault;
+        }
+        
+        public String getName() {
+            return name;
+        }
+        
+        public void setName(String name) {
+            this.name = name;
+        }
+        
+        public boolean isDefault() {
+            return isDefault;
+        }
+        
+        public void setDefault(boolean isDefault) {
+            this.isDefault = isDefault;
+        }
     }
 }

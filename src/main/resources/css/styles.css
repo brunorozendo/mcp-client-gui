@@ -249,3 +249,113 @@
 .scroll-bar .decrement-arrow {
     -fx-background-color: transparent;
 }
+
+/* Table view styling */
+.table-view {
+    -fx-background-color: white;
+    -fx-background-radius: 6px;
+    -fx-border-color: #ddd;
+    -fx-border-radius: 6px;
+    -fx-border-width: 1px;
+}
+
+.table-view .column-header {
+    -fx-background-color: #ecf0f1;
+    -fx-font-weight: bold;
+    -fx-padding: 10px;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: #ecf0f1;
+}
+
+.table-view .table-row-cell {
+    -fx-background-color: white;
+    -fx-padding: 8px;
+    -fx-border-color: transparent transparent #ecf0f1 transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.table-view .table-row-cell:hover {
+    -fx-background-color: #f8f9fa;
+}
+
+.table-view .table-row-cell:selected {
+    -fx-background-color: #e3f2fd;
+}
+
+/* Small button styling for table actions */
+.small-button {
+    -fx-padding: 4px 12px;
+    -fx-font-size: 12px;
+}
+
+.danger-button {
+    -fx-background-color: #e74c3c;
+}
+
+.danger-button:hover {
+    -fx-background-color: #c0392b;
+}
+
+.danger-button:pressed {
+    -fx-background-color: #a93226;
+}
+
+.danger-button:disabled {
+    -fx-background-color: #f5b7b1;
+    -fx-text-fill: #e8e8e8;
+}
+
+/* Section title styling */
+.section-title {
+    -fx-text-fill: #2c3e50;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
+/* Header area styling */
+.header-area {
+    -fx-background-color: #ecf0f1;
+    -fx-border-color: #ddd;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* Model selection styling */
+.model-label {
+    -fx-text-fill: #34495e;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
+.model-combo {
+    -fx-background-color: white;
+    -fx-background-radius: 6px;
+    -fx-border-color: #ddd;
+    -fx-border-radius: 6px;
+    -fx-border-width: 1px;
+    -fx-padding: 6px 12px;
+    -fx-font-size: 13px;
+}
+
+.model-combo:hover {
+    -fx-border-color: #3498db;
+}
+
+.model-combo:focused {
+    -fx-border-color: #3498db;
+    -fx-effect: dropshadow(gaussian, rgba(52, 152, 219, 0.3), 3, 0, 0, 0);
+}
+
+.model-combo .list-cell {
+    -fx-padding: 4px 8px;
+}
+
+.model-combo .list-cell:hover {
+    -fx-background-color: #e3f2fd;
+}
+
+.model-combo .list-cell:selected {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+}
