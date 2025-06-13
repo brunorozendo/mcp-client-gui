@@ -27,6 +27,8 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.HtmlRenderer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -183,47 +185,47 @@ public class MainController implements Initializable {
     private void updateModelComboBox() {
         // Store current selection
         String currentSelection = modelComboBox.getValue();
-        
+
         // Clear and repopulate
         modelComboBox.getItems().clear();
-        
+
         // Add all available models
         for (AppSettings.LlmModel model : appSettings.getLlmModels()) {
             modelComboBox.getItems().add(model.getName());
         }
-        
+
         // Restore selection if it still exists
         if (currentSelection != null && modelComboBox.getItems().contains(currentSelection)) {
             modelComboBox.setValue(currentSelection);
         }
     }
-    
+
     private void handleModelChange() {
         if (currentChat == null || modelComboBox.getValue() == null) {
             return;
         }
-        
+
         String newModel = modelComboBox.getValue();
         String oldModel = currentChat.getLlmModelName();
-        
+
         // Only update if the model actually changed
         if (!newModel.equals(oldModel)) {
             // Update the chat's model
             currentChat.setLlmModelName(newModel);
-            
+
             // Save to database
             databaseService.saveChat(currentChat);
-            
+
             // Update the title
             titleLabel.setText("MCP Assistant - " + currentChat.getName());
-            
+
             // Refresh the chat list to show the updated model
             chatListView.refresh();
-            
+
             // Create new chat controller for the new model
             if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
                 createChatControllerForModel(newModel);
-                
+
                 // Show status update
                 updateStatusLabel("Switched to model: " + newModel);
             }
@@ -238,7 +240,7 @@ public class MainController implements Initializable {
             showNotConfiguredAlert();
             return;
         }
-        
+
         Chat newChat = new Chat("Chat " + (chats.size() + 1), defaultModelName);
 
         // Save to database
@@ -276,7 +278,7 @@ public class MainController implements Initializable {
             if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
                 // Ensure chat controller is using the correct model for this chat
                 ensureChatControllerForCurrentChat();
-                
+
                 if (chatController != null) {
                     // Disable input during processing
                     messageInput.setDisable(true);
@@ -317,10 +319,10 @@ public class MainController implements Initializable {
             if (settingsController.isSaved()) {
                 // Reload settings to get updated models
                 appSettings = databaseService.loadSettings();
-                
+
                 // Update the model ComboBox with new models
                 updateModelComboBox();
-                
+
                 // Re-initialize MCP and AI
                 initializeMcpAndAI();
             }
@@ -407,25 +409,25 @@ public class MainController implements Initializable {
         }
         return llmModelString;
     }
-    
+
     private void ensureChatControllerForCurrentChat() {
         if (currentChat == null || currentChat.getLlmModelName() == null) {
             return;
         }
-        
+
         String chatModel = currentChat.getLlmModelName();
-        
+
         // Check if we need to create a new chat controller or if the current one matches
         if (chatController == null || !chatModel.equals(currentChatControllerModel)) {
             createChatControllerForModel(chatModel);
         }
     }
-    
+
     private void createChatControllerForModel(String modelName) {
         if (ollamaApiClient == null || mcpConnectionManager == null || allMcpTools == null) {
             return;
         }
-        
+
         try {
             // Prepare for the LLM: Convert MCP tools to Ollama format and build a system prompt
             List<OllamaApi.Tool> ollamaTools = SchemaConverter.convertMcpToolsToOllamaTools(allMcpTools);
@@ -445,9 +447,9 @@ public class MainController implements Initializable {
             chatController.setOnMessageReceived(this::onAIMessageReceived);
             chatController.setOnThinking(this::onThinking);
             chatController.setOnThinkingFinished(this::onThinkingFinished);
-            
+
             currentChatControllerModel = modelName;
-            
+
             logger.info("Created chat controller for model: " + modelName);
         } catch (Exception e) {
             logger.error("Error creating chat controller for model: " + modelName, e);
@@ -488,7 +490,7 @@ public class MainController implements Initializable {
         }
 
         messageListView.setItems(chat.getMessages());
-        
+
         // Update model ComboBox
         modelComboBox.setDisable(false);
         modelComboBox.setValue(chat.getLlmModelName());
@@ -503,7 +505,7 @@ public class MainController implements Initializable {
         // Ensure we have the right chat controller for this chat's model
         if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
             ensureChatControllerForCurrentChat();
-            
+
             // Clear chat controller history
             if (chatController != null) {
                 chatController.clearHistory();
@@ -515,7 +517,7 @@ public class MainController implements Initializable {
     private void loadChatsFromDatabase() {
         // Load all chats from database
         List<Chat> savedChats = databaseService.getAllChats();
-        
+
         // Handle migration: set default model for chats without a model
         String defaultModelName = appSettings.getDefaultLlmModelName();
         for (Chat chat : savedChats) {
@@ -526,15 +528,15 @@ public class MainController implements Initializable {
                 }
             }
         }
-        
+
         chats.addAll(savedChats);
 
         // If no chats exist, create a welcome chat
         if (chats.isEmpty()) {
             if (defaultModelName == null || defaultModelName.isEmpty()) {
-                defaultModelName = "llama3.2"; // Fallback
+                defaultModelName = "qwen3:8b"; // Fallback
             }
-            
+
             Chat welcomeChat = new Chat("Welcome Chat", defaultModelName);
             welcomeChat = databaseService.saveChat(welcomeChat);
 
@@ -629,7 +631,7 @@ public class MainController implements Initializable {
                 nameLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: normal; -fx-text-fill: white;");
 
                 hbox.getChildren().addAll(icon, nameLabel);
-                
+
                 // Add model label if available
                 if (chat.getLlmModelName() != null && !chat.getLlmModelName().isEmpty()) {
                     Label modelLabel = new Label(chat.getLlmModelName());
@@ -638,9 +640,211 @@ public class MainController implements Initializable {
                 } else {
                     vbox.getChildren().add(hbox);
                 }
-                
+
                 setGraphic(vbox);
             }
+        }
+    }
+
+    /**
+     * Converts markdown text to JavaFX nodes for display
+     */
+    private TextFlow renderMarkdown(String markdownText, boolean isUserMessage) {
+        // Create a parser
+        Parser parser = Parser.builder().build();
+        // Parse the markdown text
+        org.commonmark.node.Node document = parser.parse(markdownText);
+
+        // Create a TextFlow to hold the formatted text
+        TextFlow textFlow = new TextFlow();
+        textFlow.setPadding(new Insets(10, 15, 10, 15));
+        textFlow.setMaxWidth(400);
+
+        // Set the style based on whether it's a user message or not
+        if (isUserMessage) {
+            textFlow.setStyle("-fx-background-color: #3d98f4; -fx-background-radius: 18px;");
+        } else {
+            textFlow.setStyle("-fx-background-color: #e7edf4; -fx-background-radius: 18px;");
+        }
+
+        // Base text color based on message type
+        String baseTextColor = isUserMessage ? "white" : "#0d141c";
+
+        // Convert to HTML for easier processing
+        HtmlRenderer renderer = HtmlRenderer.builder().build();
+        String html = renderer.render(document);
+
+        // Process the HTML to create styled Text nodes
+        processHtmlToTextFlow(html, textFlow, baseTextColor);
+
+        return textFlow;
+    }
+
+    /**
+     * Process HTML content and add styled Text nodes to the TextFlow
+     */
+    private void processHtmlToTextFlow(String html, TextFlow textFlow, String baseTextColor) {
+        // This is a simplified HTML processor that handles basic markdown formatting
+
+        // Replace common markdown elements with styled text
+        // Handle paragraphs
+        String[] paragraphs = html.split("<p>");
+
+        for (int i = 0; i < paragraphs.length; i++) {
+            if (paragraphs[i].trim().isEmpty()) continue;
+
+            String paragraph = paragraphs[i].replaceAll("</p>.*", "");
+
+            // Handle strong/bold text
+            StringBuilder processedText = new StringBuilder();
+            int currentPos = 0;
+
+            // Process <strong> tags (bold text)
+            while (currentPos < paragraph.length()) {
+                int strongStart = paragraph.indexOf("<strong>", currentPos);
+                if (strongStart == -1) {
+                    // No more <strong> tags, add the rest of the text
+                    processedText.append(paragraph.substring(currentPos));
+                    break;
+                }
+
+                // Add text before the <strong> tag
+                processedText.append(paragraph.substring(currentPos, strongStart));
+                processedText.append("§BOLD_START§");
+
+                // Find the end of the <strong> tag
+                int strongEnd = paragraph.indexOf("</strong>", strongStart);
+                if (strongEnd == -1) {
+                    // No closing tag, treat the rest as normal text
+                    processedText.append(paragraph.substring(strongStart + 8));
+                    break;
+                }
+
+                // Add the content of the <strong> tag
+                processedText.append(paragraph.substring(strongStart + 8, strongEnd));
+                processedText.append("§BOLD_END§");
+
+                currentPos = strongEnd + 9; // Move past </strong>
+            }
+
+            // Process <em> tags (italic text)
+            paragraph = processedText.toString();
+            processedText = new StringBuilder();
+            currentPos = 0;
+
+            while (currentPos < paragraph.length()) {
+                int emStart = paragraph.indexOf("<em>", currentPos);
+                if (emStart == -1) {
+                    // No more <em> tags, add the rest of the text
+                    processedText.append(paragraph.substring(currentPos));
+                    break;
+                }
+
+                // Add text before the <em> tag
+                processedText.append(paragraph.substring(currentPos, emStart));
+                processedText.append("§ITALIC_START§");
+
+                // Find the end of the <em> tag
+                int emEnd = paragraph.indexOf("</em>", emStart);
+                if (emEnd == -1) {
+                    // No closing tag, treat the rest as normal text
+                    processedText.append(paragraph.substring(emStart + 4));
+                    break;
+                }
+
+                // Add the content of the <em> tag
+                processedText.append(paragraph.substring(emStart + 4, emEnd));
+                processedText.append("§ITALIC_END§");
+
+                currentPos = emEnd + 5; // Move past </em>
+            }
+
+            // Process <code> tags (code text)
+            paragraph = processedText.toString();
+            processedText = new StringBuilder();
+            currentPos = 0;
+
+            while (currentPos < paragraph.length()) {
+                int codeStart = paragraph.indexOf("<code>", currentPos);
+                if (codeStart == -1) {
+                    // No more <code> tags, add the rest of the text
+                    processedText.append(paragraph.substring(currentPos));
+                    break;
+                }
+
+                // Add text before the <code> tag
+                processedText.append(paragraph.substring(currentPos, codeStart));
+                processedText.append("§CODE_START§");
+
+                // Find the end of the <code> tag
+                int codeEnd = paragraph.indexOf("</code>", codeStart);
+                if (codeEnd == -1) {
+                    // No closing tag, treat the rest as normal text
+                    processedText.append(paragraph.substring(codeStart + 6));
+                    break;
+                }
+
+                // Add the content of the <code> tag
+                processedText.append(paragraph.substring(codeStart + 6, codeEnd));
+                processedText.append("§CODE_END§");
+
+                currentPos = codeEnd + 7; // Move past </code>
+            }
+
+            // Remove any remaining HTML tags
+            String cleanText = processedText.toString().replaceAll("<[^>]*>", "");
+
+            // Split by our custom markers and create styled Text nodes
+            String[] parts = cleanText.split("(§BOLD_START§|§BOLD_END§|§ITALIC_START§|§ITALIC_END§|§CODE_START§|§CODE_END§)");
+            boolean isBold = false;
+            boolean isItalic = false;
+            boolean isCode = false;
+
+            for (int j = 0; j < parts.length; j++) {
+                if (parts[j].isEmpty()) continue;
+
+                Text text = new Text(parts[j]);
+
+                // Apply base style
+                StringBuilder style = new StringBuilder("-fx-fill: " + baseTextColor + ";");
+
+                // Apply formatting
+                if (isBold) {
+                    style.append(" -fx-font-weight: bold;");
+                }
+                if (isItalic) {
+                    style.append(" -fx-font-style: italic;");
+                }
+                if (isCode) {
+                    style.append(" -fx-font-family: monospace; -fx-background-color: rgba(0,0,0,0.1); -fx-padding: 2;");
+                }
+
+                text.setStyle(style.toString());
+                textFlow.getChildren().add(text);
+
+                // Toggle formatting for next part
+                if (j < parts.length - 1) {
+                    if (cleanText.contains("§BOLD_START§" + parts[j] + "§BOLD_END§")) {
+                        isBold = !isBold;
+                    } else if (cleanText.contains("§ITALIC_START§" + parts[j] + "§ITALIC_END§")) {
+                        isItalic = !isItalic;
+                    } else if (cleanText.contains("§CODE_START§" + parts[j] + "§CODE_END§")) {
+                        isCode = !isCode;
+                    }
+                }
+            }
+
+            // Add a newline between paragraphs if not the last paragraph
+            if (i < paragraphs.length - 1) {
+                textFlow.getChildren().add(new Text("\n"));
+            }
+        }
+
+        // If no content was added (e.g., if HTML processing failed), add the original text
+        if (textFlow.getChildren().isEmpty()) {
+            Text fallbackText = new Text(html.replaceAll("<[^>]*>", ""));
+            fallbackText.setStyle("-fx-fill: " + baseTextColor + ";");
+            textFlow.getChildren().add(fallbackText);
         }
     }
 
@@ -660,23 +864,19 @@ public class MainController implements Initializable {
 
                 // Message bubble
                 HBox bubbleContainer = new HBox();
-                TextFlow textFlow = new TextFlow(new Text(message.getContent()));
-                textFlow.setPadding(new Insets(10, 15, 10, 15));
-                textFlow.setMaxWidth(400);
+
+                // Render markdown content
+                TextFlow textFlow = renderMarkdown(message.getContent(), message.isFromUser());
 
                 // Time label
                 Label timeLabel = new Label(message.getTimestamp().format(timeFormatter));
                 timeLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666666;");
 
                 if (message.isFromUser()) {
-                    textFlow.setStyle("-fx-background-color: #3d98f4; -fx-background-radius: 18px;");
-                    textFlow.getChildren().forEach(node -> ((Text)node).setStyle("-fx-fill: white;"));
                     bubbleContainer.setAlignment(Pos.CENTER_RIGHT);
                     timeLabel.setAlignment(Pos.CENTER_RIGHT);
                     messageBox.setAlignment(Pos.CENTER_RIGHT);
                 } else {
-                    textFlow.setStyle("-fx-background-color: #e7edf4; -fx-background-radius: 18px;");
-                    textFlow.getChildren().forEach(node -> ((Text)node).setStyle("-fx-fill: #0d141c;"));
                     bubbleContainer.setAlignment(Pos.CENTER_LEFT);
                     timeLabel.setAlignment(Pos.CENTER_LEFT);
                     messageBox.setAlignment(Pos.CENTER_LEFT);

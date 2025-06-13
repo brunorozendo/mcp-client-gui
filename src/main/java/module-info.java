@@ -11,11 +11,12 @@ module com.brunorozendo.mcpclientgui {
     requires ch.qos.logback.classic;
     requires java.sql;
     requires org.xerial.sqlitejdbc;
-    
+    requires org.commonmark;
+
     opens com.brunorozendo.mcpclientgui to javafx.fxml;
     opens com.brunorozendo.mcpclientgui.controller to javafx.fxml;
     opens com.brunorozendo.mcpclientgui.model to com.fasterxml.jackson.databind;
-    
+
     exports com.brunorozendo.mcpclientgui;
     exports com.brunorozendo.mcpclientgui.controller;
     exports com.brunorozendo.mcpclientgui.model;

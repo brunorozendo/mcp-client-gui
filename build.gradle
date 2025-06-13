@@ -47,6 +47,9 @@ dependencies {
     // SQLite for persistence
     implementation 'org.xerial:sqlite-jdbc:3.42.0.0'
 
+    // Markdown processing
+    implementation 'org.commonmark:commonmark:0.21.0'
+
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
     testImplementation 'org.testfx:testfx-core:4.0.18'

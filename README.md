@@ -52,7 +52,7 @@ Create an `mcp.json` file to define your MCP servers. Example:
 
 When you first run the application, click the "Settings" button to configure:
 
-1. **LLM Model**: The Ollama model name (e.g., `llama3.2`, `qwen:7b`)
+1. **LLM Model**: The Ollama model name (e.g., `qwen3:14b`)
 2. **MCP Config File**: Path to your `mcp.json` file
 3. **Ollama Base URL**: URL of your Ollama instance (default: `http://localhost:11434`)
 

@@ -409,7 +409,7 @@ public class DatabaseService {
         
         // If no models exist, add the default one
         if (models.isEmpty()) {
-            AppSettings.LlmModel defaultModel = new AppSettings.LlmModel("llama3.2", true);
+            AppSettings.LlmModel defaultModel = new AppSettings.LlmModel("qwen3:14b", true);
             saveLlmModel(defaultModel);
             models.add(defaultModel);
             settings.setDefaultLlmModelName(defaultModel.getName());

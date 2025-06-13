@@ -26,7 +26,7 @@
             
             <HBox spacing="10.0">
                <children>
-                  <TextField fx:id="newModelField" promptText="Enter model name (e.g., llama3.2, qwen:7b)" HBox.hgrow="ALWAYS" />
+                  <TextField fx:id="newModelField" promptText="Enter model name (e.g. qwen3:14b)" HBox.hgrow="ALWAYS" />
                   <Button fx:id="addModelButton" text="Add Model" onAction="#handleAddModel" />
                </children>
             </HBox>
