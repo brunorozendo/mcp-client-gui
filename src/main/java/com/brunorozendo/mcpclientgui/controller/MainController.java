@@ -39,72 +39,106 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.ResourceBundle;
 
+/**
+ * Main controller for the MCP Client GUI application.
+ * 
+ * This controller manages the main user interface, including:
+ * - Chat list and selection
+ * - Message display and input
+ * - Model selection and configuration
+ * - Integration with MCP servers and LLM models
+ */
 public class MainController implements Initializable {
 
     private static final Logger logger = LoggerFactory.getLogger(MainController.class);
 
-    @FXML
-    private ListView<Chat> chatListView;
-
-    @FXML
-    private Label titleLabel;
-
-    @FXML
-    private ListView<Message> messageListView;
-
-    @FXML
-    private TextArea messageInput;
-
-    @FXML
-    private Button sendButton;
-
-    @FXML
-    private Button newChatButton;
-
-    @FXML
-    private Button settingsButton;
-
-    @FXML
-    private Label statusLabel;
+    // UI Constants
+    private static final String TIME_FORMAT_PATTERN = "HH:mm";
+    private static final String DEFAULT_CHAT_NAME_PREFIX = "Chat ";
+    private static final String APP_TITLE_PREFIX = "MCP Assistant";
+    private static final String STATUS_READY = "Ready";
+    private static final int MAX_CONTENT_PREVIEW_LENGTH = 50;
     
-    @FXML
-    private ComboBox<String> modelComboBox;
+    // Message display constants
+    private static final int MESSAGE_BUBBLE_PADDING = 10;
+    private static final int MESSAGE_BUBBLE_MAX_WIDTH = 400;
+    private static final String USER_MESSAGE_STYLE = "-fx-background-color: #3d98f4; -fx-background-radius: 18px;";
+    private static final String AI_MESSAGE_STYLE = "-fx-background-color: #e7edf4; -fx-background-radius: 18px;";
+    private static final String USER_TEXT_COLOR = "white";
+    private static final String AI_TEXT_COLOR = "#0d141c";
+    
+    // FXML UI Components
+    @FXML private ListView<Chat> chatListView;
+    @FXML private Label titleLabel;
+    @FXML private ListView<Message> messageListView;
+    @FXML private TextArea messageInput;
+    @FXML private Button sendButton;
+    @FXML private Button newChatButton;
+    @FXML private Button settingsButton;
+    @FXML private Label statusLabel;
+    @FXML private ComboBox<String> modelComboBox;
 
-    private ObservableList<Chat> chats = FXCollections.observableArrayList();
+    // Data management
+    private final ObservableList<Chat> chats = FXCollections.observableArrayList();
     private Chat currentChat;
-    private DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
+    private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern(TIME_FORMAT_PATTERN);
 
-    // Database service
+    // Services and controllers
     private DatabaseService databaseService;
-
-    // MCP and AI related components
     private AppSettings appSettings = new AppSettings();
     private McpConnectionManager mcpConnectionManager;
     private OllamaApiClient ollamaApiClient;
     private GuiChatController chatController;
+    
+    // State management
     private boolean isInitialized = false;
     private String currentChatControllerModel = null;
     
-    // MCP data cached for creating chat controllers
+    // MCP capabilities cache
     private List<McpSchema.Tool> allMcpTools;
     private List<McpSchema.Resource> allMcpResources;
     private List<McpSchema.Prompt> allMcpPrompts;
 
+    /**
+     * Initializes the controller after the FXML has been loaded.
+     */
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        // Initialize database service
+        initializeServices();
+        initializeUI();
+        loadApplicationData();
+        autoInitializeIfConfigured();
+    }
+    
+    /**
+     * Initializes core services required by the application.
+     */
+    private void initializeServices() {
         databaseService = DatabaseService.getInstance();
-
-        // Load app settings from database
         appSettings = databaseService.loadSettings();
-
+    }
+    
+    /**
+     * Sets up all UI components and their behaviors.
+     */
+    private void initializeUI() {
         setupChatList();
         setupMessageList();
         setupMessageInput();
         setupModelComboBox();
+    }
+    
+    /**
+     * Loads persisted data from the database.
+     */
+    private void loadApplicationData() {
         loadChatsFromDatabase();
-
-        // Auto-initialize if settings are valid
+    }
+    
+    /**
+     * Attempts to auto-initialize MCP and AI connections if settings are valid.
+     */
+    private void autoInitializeIfConfigured() {
         if (appSettings.isValid()) {
             initializeMcpAndAI();
         } else {
@@ -112,94 +146,131 @@ public class MainController implements Initializable {
         }
     }
 
+    // ===== Chat List Management =====
+    
+    /**
+     * Sets up the chat list view with custom cell factory and selection handling.
+     */
     private void setupChatList() {
         chatListView.setItems(chats);
-        chatListView.setCellFactory(listView -> {
-            ChatListCell cell = new ChatListCell();
-
-            // Create context menu for chat items
-            ContextMenu contextMenu = new ContextMenu();
-
-            MenuItem renameItem = new MenuItem("Rename");
-            renameItem.setOnAction(e -> {
-                Chat chat = cell.getItem();
-                if (chat != null) {
-                    showRenameDialog(chat);
+        chatListView.setCellFactory(listView -> createChatListCell());
+        chatListView.getSelectionModel().selectedItemProperty().addListener(
+            (obs, oldChat, newChat) -> {
+                if (newChat != null) {
+                    loadChat(newChat);
                 }
-            });
+            }
+        );
+    }
+    
+    /**
+     * Creates a custom list cell for displaying chats with context menu.
+     */
+    private ListCell<Chat> createChatListCell() {
+        ChatListCell cell = new ChatListCell();
+        cell.setContextMenu(createChatContextMenu(cell));
+        return cell;
+    }
+    
+    /**
+     * Creates a context menu for chat items with rename and delete options.
+     */
+    private ContextMenu createChatContextMenu(ChatListCell cell) {
+        ContextMenu contextMenu = new ContextMenu();
 
-            MenuItem deleteItem = new MenuItem("Delete");
-            deleteItem.setOnAction(e -> {
-                Chat chat = cell.getItem();
-                if (chat != null) {
-                    showDeleteConfirmation(chat);
-                }
-            });
-
-            contextMenu.getItems().addAll(renameItem, new SeparatorMenuItem(), deleteItem);
-            cell.setContextMenu(contextMenu);
-
-            return cell;
-        });
-
-        chatListView.getSelectionModel().selectedItemProperty().addListener((obs, oldChat, newChat) -> {
-            if (newChat != null) {
-                loadChat(newChat);
+        MenuItem renameItem = new MenuItem("Rename");
+        renameItem.setOnAction(e -> {
+            Chat chat = cell.getItem();
+            if (chat != null) {
+                showRenameDialog(chat);
             }
         });
+
+        MenuItem deleteItem = new MenuItem("Delete");
+        deleteItem.setOnAction(e -> {
+            Chat chat = cell.getItem();
+            if (chat != null) {
+                showDeleteConfirmation(chat);
+            }
+        });
+
+        contextMenu.getItems().addAll(renameItem, new SeparatorMenuItem(), deleteItem);
+        return contextMenu;
     }
 
+    // ===== Message List Management =====
+    
+    /**
+     * Sets up the message list view with custom cell factory.
+     */
     private void setupMessageList() {
         messageListView.setCellFactory(listView -> new MessageListCell());
         messageListView.setPlaceholder(new Label("Select a chat to start messaging"));
     }
 
+    // ===== Message Input Management =====
+    
+    /**
+     * Sets up the message input area with keyboard shortcuts and initial state.
+     */
     private void setupMessageInput() {
         messageInput.setWrapText(true);
-        messageInput.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if (event.getCode() == KeyCode.ENTER && !event.isShiftDown()) {
-                event.consume();
-                handleSendMessage();
-            }
-        });
-
+        messageInput.addEventFilter(KeyEvent.KEY_PRESSED, this::handleMessageInputKeyPress);
+        
         // Initially disable input until properly configured
-        messageInput.setDisable(true);
-        sendButton.setDisable(true);
+        setMessageInputEnabled(false);
     }
     
+    /**
+     * Handles key press events in the message input area.
+     */
+    private void handleMessageInputKeyPress(KeyEvent event) {
+        if (event.getCode() == KeyCode.ENTER && !event.isShiftDown()) {
+            event.consume();
+            handleSendMessage();
+        }
+    }
+    
+    /**
+     * Enables or disables the message input controls.
+     */
+    private void setMessageInputEnabled(boolean enabled) {
+        messageInput.setDisable(!enabled);
+        sendButton.setDisable(!enabled);
+    }
+    
+    // ===== Model Selection Management =====
+    
+    /**
+     * Sets up the model selection combo box.
+     */
     private void setupModelComboBox() {
-        // Set placeholder text
         modelComboBox.setPromptText("Select a model");
-        
-        // Populate with available models
         updateModelComboBox();
-        
-        // Initially disable until a chat is selected
         modelComboBox.setDisable(true);
-        
-        // Handle model selection changes
         modelComboBox.setOnAction(e -> handleModelChange());
     }
     
+    /**
+     * Updates the model combo box with available models from settings.
+     */
     private void updateModelComboBox() {
-        // Store current selection
         String currentSelection = modelComboBox.getValue();
-
-        // Clear and repopulate
+        
         modelComboBox.getItems().clear();
-
-        // Add all available models
         for (AppSettings.LlmModel model : appSettings.getLlmModels()) {
             modelComboBox.getItems().add(model.getName());
         }
-
+        
         // Restore selection if it still exists
         if (currentSelection != null && modelComboBox.getItems().contains(currentSelection)) {
             modelComboBox.setValue(currentSelection);
         }
     }
 
+    /**
+     * Handles changes to the selected model.
+     */
     private void handleModelChange() {
         if (currentChat == null || modelComboBox.getValue() == null) {
             return;
@@ -208,131 +279,196 @@ public class MainController implements Initializable {
         String newModel = modelComboBox.getValue();
         String oldModel = currentChat.getLlmModelName();
 
-        // Only update if the model actually changed
         if (!newModel.equals(oldModel)) {
-            // Update the chat's model
-            currentChat.setLlmModelName(newModel);
-
-            // Save to database
-            databaseService.saveChat(currentChat);
-
-            // Update the title
-            titleLabel.setText("MCP Assistant - " + currentChat.getName());
-
-            // Refresh the chat list to show the updated model
-            chatListView.refresh();
-
-            // Create new chat controller for the new model
-            if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
-                createChatControllerForModel(newModel);
-
-                // Show status update
-                updateStatusLabel("Switched to model: " + newModel);
-            }
+            updateChatModel(newModel);
+        }
+    }
+    
+    /**
+     * Updates the current chat's model and refreshes related components.
+     */
+    private void updateChatModel(String newModel) {
+        currentChat.setLlmModelName(newModel);
+        databaseService.saveChat(currentChat);
+        
+        updateTitle();
+        chatListView.refresh();
+        
+        if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
+            createChatControllerForModel(newModel);
+            updateStatusLabel("Switched to model: " + newModel);
         }
     }
 
+    // ===== Action Handlers =====
+    
+    /**
+     * Handles the creation of a new chat.
+     */
     @FXML
     private void handleNewChat() {
-        // Get default model from settings
         String defaultModelName = appSettings.getDefaultLlmModelName();
         if (defaultModelName == null || defaultModelName.isEmpty()) {
             showNotConfiguredAlert();
             return;
         }
 
-        Chat newChat = new Chat("Chat " + (chats.size() + 1), defaultModelName);
-
-        // Save to database
-        newChat = databaseService.saveChat(newChat);
-
-        chats.add(newChat);
-        chatListView.getSelectionModel().select(newChat);
-
-        // Clear chat controller history for new chat
+        Chat newChat = createNewChat(defaultModelName);
+        selectChat(newChat);
+        
         if (chatController != null) {
             chatController.clearHistory();
         }
     }
+    
+    /**
+     * Creates a new chat with the specified model.
+     */
+    private Chat createNewChat(String modelName) {
+        String chatName = DEFAULT_CHAT_NAME_PREFIX + (chats.size() + 1);
+        Chat newChat = new Chat(chatName, modelName);
+        newChat = databaseService.saveChat(newChat);
+        chats.add(newChat);
+        return newChat;
+    }
+    
+    /**
+     * Selects a chat in the list view.
+     */
+    private void selectChat(Chat chat) {
+        chatListView.getSelectionModel().select(chat);
+    }
 
+    /**
+     * Handles sending a message from the input field.
+     */
     @FXML
     private void handleSendMessage() {
         String text = messageInput.getText().trim();
-        if (!text.isEmpty() && currentChat != null) {
-            // Create user message
-            Message userMessage = new Message(text, true, LocalDateTime.now());
-
-            // Save to database if chat has an ID
-            if (currentChat.getId() != null) {
-                userMessage = databaseService.saveMessage(userMessage, currentChat.getId());
+        if (text.isEmpty() || currentChat == null) {
+            return;
+        }
+        
+        Message userMessage = createUserMessage(text);
+        addMessageToChat(userMessage);
+        messageInput.clear();
+        scrollToLatestMessage();
+        
+        processMessageWithAI(text);
+    }
+    
+    /**
+     * Creates a new user message.
+     */
+    private Message createUserMessage(String content) {
+        Message message = new Message(content, true, LocalDateTime.now());
+        if (currentChat.getId() != null) {
+            message = databaseService.saveMessage(message, currentChat.getId());
+        }
+        return message;
+    }
+    
+    /**
+     * Adds a message to the current chat.
+     */
+    private void addMessageToChat(Message message) {
+        currentChat.getMessages().add(message);
+    }
+    
+    /**
+     * Scrolls the message list to show the latest message.
+     */
+    private void scrollToLatestMessage() {
+        Platform.runLater(() -> {
+            int messageCount = currentChat.getMessages().size();
+            if (messageCount > 0) {
+                messageListView.scrollTo(messageCount - 1);
             }
-
-            // Add to chat
-            currentChat.getMessages().add(userMessage);
-            messageInput.clear();
-
-            // Scroll to bottom
-            Platform.runLater(() -> messageListView.scrollTo(currentChat.getMessages().size() - 1));
-
-            // Process with chat controller if initialized
-            if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
-                // Ensure chat controller is using the correct model for this chat
-                ensureChatControllerForCurrentChat();
-
-                if (chatController != null) {
-                    // Disable input during processing
-                    messageInput.setDisable(true);
-                    sendButton.setDisable(true);
-
-                    chatController.processUserMessage(text).whenComplete((result, throwable) -> {
-                        Platform.runLater(() -> {
-                            messageInput.setDisable(false);
-                            sendButton.setDisable(false);
-                            messageInput.requestFocus();
-                        });
-                    });
-                }
-            }
+        });
+    }
+    
+    /**
+     * Processes a user message with the AI if initialized.
+     */
+    private void processMessageWithAI(String text) {
+        if (!isInitialized || mcpConnectionManager == null || ollamaApiClient == null) {
+            return;
+        }
+        
+        ensureChatControllerForCurrentChat();
+        
+        if (chatController != null) {
+            setMessageInputEnabled(false);
+            
+            chatController.processUserMessage(text).whenComplete((result, throwable) -> {
+                Platform.runLater(() -> {
+                    setMessageInputEnabled(true);
+                    messageInput.requestFocus();
+                });
+            });
         }
     }
 
+    /**
+     * Opens the settings dialog.
+     */
     @FXML
     private void handleSettings() {
         try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/settings-view.fxml"));
-            VBox settingsRoot = loader.load();
-
-            SettingsController settingsController = loader.getController();
-
-            Stage settingsStage = new Stage();
-            settingsStage.setTitle("Settings");
-            settingsStage.initModality(Modality.WINDOW_MODAL);
-            settingsStage.initOwner(settingsButton.getScene().getWindow());
-            settingsStage.setScene(new Scene(settingsRoot));
-            settingsStage.setResizable(false);
-
-            settingsController.setDialogStage(settingsStage);
-            settingsController.setSettings(appSettings);
-
-            settingsStage.showAndWait();
-
-            if (settingsController.isSaved()) {
-                // Reload settings to get updated models
-                appSettings = databaseService.loadSettings();
-
-                // Update the model ComboBox with new models
-                updateModelComboBox();
-
-                // Re-initialize MCP and AI
-                initializeMcpAndAI();
-            }
-
+            openSettingsDialog();
         } catch (IOException e) {
             logger.error("Error loading settings dialog", e);
             showErrorAlert("Error", "Failed to load settings dialog: " + e.getMessage());
         }
     }
+    
+    /**
+     * Opens and displays the settings dialog.
+     */
+    private void openSettingsDialog() throws IOException {
+        FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/settings-view.fxml"));
+        VBox settingsRoot = loader.load();
 
+        SettingsController settingsController = loader.getController();
+        Stage settingsStage = createSettingsStage(settingsRoot);
+        
+        settingsController.setDialogStage(settingsStage);
+        settingsController.setSettings(appSettings);
+
+        settingsStage.showAndWait();
+
+        if (settingsController.isSaved()) {
+            handleSettingsSaved();
+        }
+    }
+    
+    /**
+     * Creates the settings dialog stage.
+     */
+    private Stage createSettingsStage(VBox content) {
+        Stage stage = new Stage();
+        stage.setTitle("Settings");
+        stage.initModality(Modality.WINDOW_MODAL);
+        stage.initOwner(settingsButton.getScene().getWindow());
+        stage.setScene(new Scene(content));
+        stage.setResizable(false);
+        return stage;
+    }
+    
+    /**
+     * Handles actions after settings are saved.
+     */
+    private void handleSettingsSaved() {
+        appSettings = databaseService.loadSettings();
+        updateModelComboBox();
+        initializeMcpAndAI();
+    }
+
+    // ===== MCP and AI Initialization =====
+    
+    /**
+     * Initializes MCP connections and AI client in a background thread.
+     */
     private void initializeMcpAndAI() {
         if (!appSettings.isValid()) {
             updateStatusLabel("Invalid settings. Please check your configuration.");
@@ -340,100 +476,137 @@ public class MainController implements Initializable {
         }
 
         updateStatusLabel("Initializing MCP connections...");
-
-        // Run initialization in background thread
-        new Thread(() -> {
-            try {
-                // 1. Load MCP Configuration
-                McpConfigLoader configLoader = new McpConfigLoader();
-                McpConfig mcpConfig = configLoader.load(appSettings.getMcpConfigFile());
-
-                // 2. Initialize MCP Connection Manager
-                mcpConnectionManager = new McpConnectionManager();
-                mcpConnectionManager.initializeClients(mcpConfig);
-
-                // 3. Initialize Ollama API Client
-                ollamaApiClient = new OllamaApiClient(appSettings.getOllamaBaseUrl());
-
-                // 4. Fetch all capabilities from MCP servers
-                List<McpSchema.Tool> allMcpTools = mcpConnectionManager.getAllTools();
-                List<McpSchema.Resource> allMcpResources = mcpConnectionManager.getAllResources();
-                List<McpSchema.Prompt> allMcpPrompts = mcpConnectionManager.getAllPrompts();
-
-                // Store MCP data for later use
-                this.allMcpTools = allMcpTools;
-                this.allMcpResources = allMcpResources;
-                this.allMcpPrompts = allMcpPrompts;
-
-                Platform.runLater(() -> {
-                    isInitialized = true;
-                    messageInput.setDisable(false);
-                    sendButton.setDisable(false);
-                    updateStatusLabel("Ready! Connected to " + allMcpTools.size() + " tools from MCP servers.");
-                    titleLabel.setText("MCP Assistant - Ready!");
-                });
-
-            } catch (Exception e) {
-                logger.error("Error initializing MCP and AI", e);
-                Platform.runLater(() -> {
-                    updateStatusLabel("Error: " + e.getMessage());
-                    showErrorAlert("Initialization Error", "Failed to initialize MCP and AI: " + e.getMessage());
-                });
-            }
-        }).start();
+        
+        new Thread(this::performMcpInitialization).start();
     }
+    
+    /**
+     * Performs the actual MCP initialization process.
+     */
+    private void performMcpInitialization() {
+        try {
+            // Load MCP Configuration
+            McpConfigLoader configLoader = new McpConfigLoader();
+            McpConfig mcpConfig = configLoader.load(appSettings.getMcpConfigFile());
 
-    private void onAIMessageReceived(Message message) {
-        if (currentChat != null) {
-            // Save to database if chat has an ID
-            if (currentChat.getId() != null) {
-                message = databaseService.saveMessage(message, currentChat.getId());
-            }
+            // Initialize MCP Connection Manager
+            mcpConnectionManager = new McpConnectionManager();
+            mcpConnectionManager.initializeClients(mcpConfig);
 
-            currentChat.getMessages().add(message);
-            Platform.runLater(() -> messageListView.scrollTo(currentChat.getMessages().size() - 1));
+            // Initialize Ollama API Client
+            ollamaApiClient = new OllamaApiClient(appSettings.getOllamaBaseUrl());
+
+            // Fetch capabilities from MCP servers
+            fetchMcpCapabilities();
+            
+            Platform.runLater(this::onMcpInitializationComplete);
+        } catch (Exception e) {
+            logger.error("Error initializing MCP and AI", e);
+            Platform.runLater(() -> onMcpInitializationError(e));
         }
     }
+    
+    /**
+     * Fetches all capabilities from connected MCP servers.
+     */
+    private void fetchMcpCapabilities() {
+        allMcpTools = mcpConnectionManager.getAllTools();
+        allMcpResources = mcpConnectionManager.getAllResources();
+        allMcpPrompts = mcpConnectionManager.getAllPrompts();
+    }
+    
+    /**
+     * Called when MCP initialization completes successfully.
+     */
+    private void onMcpInitializationComplete() {
+        isInitialized = true;
+        setMessageInputEnabled(true);
+        updateStatusLabel(String.format("Ready! Connected to %d tools from MCP servers.", allMcpTools.size()));
+        updateTitle();
+    }
+    
+    /**
+     * Called when MCP initialization fails.
+     */
+    private void onMcpInitializationError(Exception e) {
+        updateStatusLabel("Error: " + e.getMessage());
+        showErrorAlert("Initialization Error", "Failed to initialize MCP and AI: " + e.getMessage());
+    }
 
+    // ===== AI Message Handling =====
+    
+    /**
+     * Handles receiving a message from the AI.
+     */
+    private void onAIMessageReceived(Message message) {
+        if (currentChat == null) {
+            return;
+        }
+        
+        if (currentChat.getId() != null) {
+            message = databaseService.saveMessage(message, currentChat.getId());
+        }
+        
+        addMessageToChat(message);
+        scrollToLatestMessage();
+    }
+
+    /**
+     * Updates the status when AI is thinking.
+     */
     private void onThinking(String thinkingText) {
         Platform.runLater(() -> updateStatusLabel(thinkingText));
     }
 
+    /**
+     * Called when AI finishes thinking.
+     */
     private void onThinkingFinished() {
-        Platform.runLater(() -> updateStatusLabel("Ready"));
+        Platform.runLater(() -> updateStatusLabel(STATUS_READY));
     }
 
+    // ===== Chat Controller Management =====
+    
+    /**
+     * Parses the Ollama model name from the full model string.
+     */
     private String parseOllamaModelName(String llmModelString) {
-        if (llmModelString.startsWith("ollama:")) {
-            return llmModelString.substring("ollama:".length());
+        final String OLLAMA_PREFIX = "ollama:";
+        if (llmModelString.startsWith(OLLAMA_PREFIX)) {
+            return llmModelString.substring(OLLAMA_PREFIX.length());
         }
         return llmModelString;
     }
 
+    /**
+     * Ensures the chat controller is configured for the current chat's model.
+     */
     private void ensureChatControllerForCurrentChat() {
         if (currentChat == null || currentChat.getLlmModelName() == null) {
             return;
         }
 
         String chatModel = currentChat.getLlmModelName();
-
-        // Check if we need to create a new chat controller or if the current one matches
+        
         if (chatController == null || !chatModel.equals(currentChatControllerModel)) {
             createChatControllerForModel(chatModel);
         }
     }
 
+    /**
+     * Creates a new chat controller for the specified model.
+     */
     private void createChatControllerForModel(String modelName) {
         if (ollamaApiClient == null || mcpConnectionManager == null || allMcpTools == null) {
             return;
         }
 
         try {
-            // Prepare for the LLM: Convert MCP tools to Ollama format and build a system prompt
+            // Convert MCP tools to Ollama format and build system prompt
             List<OllamaApi.Tool> ollamaTools = SchemaConverter.convertMcpToolsToOllamaTools(allMcpTools);
             String systemPrompt = SystemPromptBuilder.build(allMcpTools, allMcpResources, allMcpPrompts);
 
-            // Create new chat controller with the specified model
+            // Create new chat controller
             String ollamaModelName = parseOllamaModelName(modelName);
             chatController = new GuiChatController(
                     ollamaModelName,
@@ -443,83 +616,95 @@ public class MainController implements Initializable {
                     ollamaTools
             );
 
-            // Set up callbacks for GUI updates
-            chatController.setOnMessageReceived(this::onAIMessageReceived);
-            chatController.setOnThinking(this::onThinking);
-            chatController.setOnThinkingFinished(this::onThinkingFinished);
-
+            configureChatControllerCallbacks();
             currentChatControllerModel = modelName;
 
-            logger.info("Created chat controller for model: " + modelName);
+            logger.info("Created chat controller for model: {}", modelName);
         } catch (Exception e) {
-            logger.error("Error creating chat controller for model: " + modelName, e);
+            logger.error("Error creating chat controller for model: {}", modelName, e);
             showErrorAlert("Model Error", "Failed to initialize model " + modelName + ": " + e.getMessage());
         }
     }
-
-    private void updateStatusLabel(String status) {
-        if (statusLabel != null) {
-            statusLabel.setText(status);
-        }
+    
+    /**
+     * Configures callbacks for the chat controller.
+     */
+    private void configureChatControllerCallbacks() {
+        chatController.setOnMessageReceived(this::onAIMessageReceived);
+        chatController.setOnThinking(this::onThinking);
+        chatController.setOnThinkingFinished(this::onThinkingFinished);
     }
 
-    private void showNotConfiguredAlert() {
-        Alert alert = new Alert(Alert.AlertType.WARNING);
-        alert.setTitle("Not Configured");
-        alert.setHeaderText(null);
-        alert.setContentText("Please configure the LLM model and MCP settings first by clicking the Settings button.");
-        alert.showAndWait();
-    }
-
-    private void showErrorAlert(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
-    }
-
+    // ===== Chat Loading and Management =====
+    
+    /**
+     * Loads and displays a chat.
+     */
     private void loadChat(Chat chat) {
         currentChat = chat;
-        titleLabel.setText("MCP Assistant - " + chat.getName());
-
-        // Load messages from database if not already loaded
-        if (chat.getId() != null && chat.getMessages().isEmpty()) {
-            List<Message> messages = databaseService.getMessagesForChat(chat.getId());
-            chat.getMessages().addAll(messages);
-        }
-
-        messageListView.setItems(chat.getMessages());
-
-        // Update model ComboBox
-        modelComboBox.setDisable(false);
-        modelComboBox.setValue(chat.getLlmModelName());
-
-        // Scroll to bottom
-        Platform.runLater(() -> {
-            if (!chat.getMessages().isEmpty()) {
-                messageListView.scrollTo(chat.getMessages().size() - 1);
-            }
-        });
-
-        // Ensure we have the right chat controller for this chat's model
+        updateTitle();
+        
+        loadChatMessages(chat);
+        updateModelSelection(chat);
+        scrollToLatestMessage();
+        
         if (isInitialized && mcpConnectionManager != null && ollamaApiClient != null) {
             ensureChatControllerForCurrentChat();
-
-            // Clear chat controller history
+            
             if (chatController != null) {
                 chatController.clearHistory();
                 // TODO: Rebuild chat history from messages if needed
             }
         }
     }
+    
+    /**
+     * Loads messages for a chat from the database if needed.
+     */
+    private void loadChatMessages(Chat chat) {
+        if (chat.getId() != null && !chat.hasMessages()) {
+            List<Message> messages = databaseService.getMessagesForChat(chat.getId());
+            chat.getMessages().addAll(messages);
+        }
+        messageListView.setItems(chat.getMessages());
+    }
+    
+    /**
+     * Updates the model selection for a chat.
+     */
+    private void updateModelSelection(Chat chat) {
+        modelComboBox.setDisable(false);
+        modelComboBox.setValue(chat.getLlmModelName());
+    }
 
+    /**
+     * Loads all chats from the database.
+     */
     private void loadChatsFromDatabase() {
-        // Load all chats from database
         List<Chat> savedChats = databaseService.getAllChats();
-
-        // Handle migration: set default model for chats without a model
+        
+        // Handle migration for chats without models
+        migrateChatsWithoutModels(savedChats);
+        
+        chats.addAll(savedChats);
+        
+        // Create welcome chat if no chats exist
+        if (chats.isEmpty()) {
+            createWelcomeChat();
+        }
+        
+        // Select first chat
+        if (!chats.isEmpty()) {
+            chatListView.getSelectionModel().select(0);
+        }
+    }
+    
+    /**
+     * Migrates chats that don't have a model assigned.
+     */
+    private void migrateChatsWithoutModels(List<Chat> savedChats) {
         String defaultModelName = appSettings.getDefaultLlmModelName();
+        
         for (Chat chat : savedChats) {
             if (chat.getLlmModelName() == null || chat.getLlmModelName().isEmpty()) {
                 if (defaultModelName != null && !defaultModelName.isEmpty()) {
@@ -528,31 +713,60 @@ public class MainController implements Initializable {
                 }
             }
         }
-
-        chats.addAll(savedChats);
-
-        // If no chats exist, create a welcome chat
-        if (chats.isEmpty()) {
-            if (defaultModelName == null || defaultModelName.isEmpty()) {
-                defaultModelName = "qwen3:8b"; // Fallback
-            }
-
-            Chat welcomeChat = new Chat("Welcome Chat", defaultModelName);
-            welcomeChat = databaseService.saveChat(welcomeChat);
-
-            Message welcomeMessage = new Message("Welcome to MCP Client GUI! Configure your settings to get started.", false, LocalDateTime.now());
-            databaseService.saveMessage(welcomeMessage, welcomeChat.getId());
-            welcomeChat.getMessages().add(welcomeMessage);
-
-            chats.add(welcomeChat);
+    }
+    
+    /**
+     * Creates a welcome chat for first-time users.
+     */
+    private void createWelcomeChat() {
+        String defaultModelName = appSettings.getDefaultLlmModelName();
+        if (defaultModelName == null || defaultModelName.isEmpty()) {
+            defaultModelName = "qwen3:8b"; // Fallback
         }
 
-        // Select first chat if available
-        if (!chats.isEmpty()) {
-            chatListView.getSelectionModel().select(0);
-        }
+        Chat welcomeChat = new Chat("Welcome Chat", defaultModelName);
+        welcomeChat = databaseService.saveChat(welcomeChat);
+
+        Message welcomeMessage = new Message(
+            "Welcome to MCP Client GUI! Configure your settings to get started.", 
+            false, 
+            LocalDateTime.now()
+        );
+        databaseService.saveMessage(welcomeMessage, welcomeChat.getId());
+        welcomeChat.getMessages().add(welcomeMessage);
+
+        chats.add(welcomeChat);
     }
 
+    // ===== UI Update Methods =====
+    
+    /**
+     * Updates the status label with the given text.
+     */
+    private void updateStatusLabel(String status) {
+        if (statusLabel != null) {
+            statusLabel.setText(status);
+        }
+    }
+    
+    /**
+     * Updates the title label based on the current state.
+     */
+    private void updateTitle() {
+        String title = APP_TITLE_PREFIX;
+        if (currentChat != null) {
+            title += " - " + currentChat.getName();
+        } else if (isInitialized) {
+            title += " - Ready!";
+        }
+        titleLabel.setText(title);
+    }
+
+    // ===== Dialog Methods =====
+    
+    /**
+     * Shows the rename dialog for a chat.
+     */
     private void showRenameDialog(Chat chat) {
         TextInputDialog dialog = new TextInputDialog(chat.getName());
         dialog.setTitle("Rename Chat");
@@ -561,20 +775,27 @@ public class MainController implements Initializable {
 
         dialog.showAndWait().ifPresent(newName -> {
             if (!newName.trim().isEmpty()) {
-                chat.setName(newName.trim());
-                databaseService.saveChat(chat);
-
-                // Refresh the list view
-                chatListView.refresh();
-
-                // Update title if this is the current chat
-                if (chat == currentChat) {
-                    titleLabel.setText("MCP Assistant - " + chat.getName());
-                }
+                renameChat(chat, newName.trim());
             }
         });
     }
+    
+    /**
+     * Renames a chat and updates the UI.
+     */
+    private void renameChat(Chat chat, String newName) {
+        chat.setName(newName);
+        databaseService.saveChat(chat);
+        chatListView.refresh();
+        
+        if (chat == currentChat) {
+            updateTitle();
+        }
+    }
 
+    /**
+     * Shows the delete confirmation dialog for a chat.
+     */
     private void showDeleteConfirmation(Chat chat) {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Delete Chat");
@@ -583,32 +804,72 @@ public class MainController implements Initializable {
 
         alert.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                // Delete from database
-                if (chat.getId() != null) {
-                    databaseService.deleteChat(chat.getId());
-                }
-
-                // Remove from list
-                chats.remove(chat);
-
-                // If this was the current chat, clear the view
-                if (chat == currentChat) {
-                    currentChat = null;
-                    messageListView.setItems(FXCollections.observableArrayList());
-                    titleLabel.setText("MCP Assistant");
-                    modelComboBox.setValue(null);
-                    modelComboBox.setDisable(true);
-                }
-
-                // Select another chat if available
-                if (!chats.isEmpty()) {
-                    chatListView.getSelectionModel().select(0);
-                }
+                deleteChat(chat);
             }
         });
     }
+    
+    /**
+     * Deletes a chat and updates the UI.
+     */
+    private void deleteChat(Chat chat) {
+        // Delete from database
+        if (chat.getId() != null) {
+            databaseService.deleteChat(chat.getId());
+        }
 
-    // Custom cell for chat list
+        // Remove from list
+        chats.remove(chat);
+
+        // Clear view if this was the current chat
+        if (chat == currentChat) {
+            clearCurrentChatView();
+        }
+
+        // Select another chat if available
+        if (!chats.isEmpty()) {
+            chatListView.getSelectionModel().select(0);
+        }
+    }
+    
+    /**
+     * Clears the view when no chat is selected.
+     */
+    private void clearCurrentChatView() {
+        currentChat = null;
+        messageListView.setItems(FXCollections.observableArrayList());
+        titleLabel.setText(APP_TITLE_PREFIX);
+        modelComboBox.setValue(null);
+        modelComboBox.setDisable(true);
+    }
+
+    /**
+     * Shows an alert indicating the application is not configured.
+     */
+    private void showNotConfiguredAlert() {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle("Not Configured");
+        alert.setHeaderText(null);
+        alert.setContentText("Please configure the LLM model and MCP settings first by clicking the Settings button.");
+        alert.showAndWait();
+    }
+
+    /**
+     * Shows an error alert with the specified title and message.
+     */
+    private void showErrorAlert(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    // ===== Inner Classes =====
+    
+    /**
+     * Custom cell for displaying chats in the list view.
+     */
     private class ChatListCell extends ListCell<Chat> {
         @Override
         protected void updateItem(Chat chat, boolean empty) {
@@ -618,237 +879,59 @@ public class MainController implements Initializable {
                 setText(null);
                 setGraphic(null);
             } else {
-                VBox vbox = new VBox(2);
-                vbox.setPadding(new Insets(8, 12, 8, 12));
-
-                HBox hbox = new HBox(8);
-                hbox.setAlignment(Pos.CENTER_LEFT);
-
-                Label icon = new Label("💬");
-                icon.setStyle("-fx-font-size: 18px;");
-
-                Label nameLabel = new Label(chat.getName());
-                nameLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: normal; -fx-text-fill: white;");
-
-                hbox.getChildren().addAll(icon, nameLabel);
-
-                // Add model label if available
-                if (chat.getLlmModelName() != null && !chat.getLlmModelName().isEmpty()) {
-                    Label modelLabel = new Label(chat.getLlmModelName());
-                    modelLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: rgba(255, 255, 255, 0.7); -fx-padding: 0 0 0 26;");
-                    vbox.getChildren().addAll(hbox, modelLabel);
-                } else {
-                    vbox.getChildren().add(hbox);
-                }
-
-                setGraphic(vbox);
+                setGraphic(createChatCellContent(chat));
             }
+        }
+        
+        /**
+         * Creates the visual content for a chat cell.
+         */
+        private VBox createChatCellContent(Chat chat) {
+            VBox vbox = new VBox(2);
+            vbox.setPadding(new Insets(8, 12, 8, 12));
+
+            HBox hbox = createChatHeader(chat);
+            vbox.getChildren().add(hbox);
+            
+            // Add model label if available
+            if (chat.getLlmModelName() != null && !chat.getLlmModelName().isEmpty()) {
+                Label modelLabel = createModelLabel(chat.getLlmModelName());
+                vbox.getChildren().add(modelLabel);
+            }
+            
+            return vbox;
+        }
+        
+        /**
+         * Creates the header row for a chat cell.
+         */
+        private HBox createChatHeader(Chat chat) {
+            HBox hbox = new HBox(8);
+            hbox.setAlignment(Pos.CENTER_LEFT);
+
+            Label icon = new Label("💬");
+            icon.setStyle("-fx-font-size: 18px;");
+
+            Label nameLabel = new Label(chat.getName());
+            nameLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: normal; -fx-text-fill: white;");
+
+            hbox.getChildren().addAll(icon, nameLabel);
+            return hbox;
+        }
+        
+        /**
+         * Creates a label displaying the model name.
+         */
+        private Label createModelLabel(String modelName) {
+            Label modelLabel = new Label(modelName);
+            modelLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: rgba(255, 255, 255, 0.7); -fx-padding: 0 0 0 26;");
+            return modelLabel;
         }
     }
 
     /**
-     * Converts markdown text to JavaFX nodes for display
+     * Custom cell for displaying messages in the list view.
      */
-    private TextFlow renderMarkdown(String markdownText, boolean isUserMessage) {
-        // Create a parser
-        Parser parser = Parser.builder().build();
-        // Parse the markdown text
-        org.commonmark.node.Node document = parser.parse(markdownText);
-
-        // Create a TextFlow to hold the formatted text
-        TextFlow textFlow = new TextFlow();
-        textFlow.setPadding(new Insets(10, 15, 10, 15));
-        textFlow.setMaxWidth(400);
-
-        // Set the style based on whether it's a user message or not
-        if (isUserMessage) {
-            textFlow.setStyle("-fx-background-color: #3d98f4; -fx-background-radius: 18px;");
-        } else {
-            textFlow.setStyle("-fx-background-color: #e7edf4; -fx-background-radius: 18px;");
-        }
-
-        // Base text color based on message type
-        String baseTextColor = isUserMessage ? "white" : "#0d141c";
-
-        // Convert to HTML for easier processing
-        HtmlRenderer renderer = HtmlRenderer.builder().build();
-        String html = renderer.render(document);
-
-        // Process the HTML to create styled Text nodes
-        processHtmlToTextFlow(html, textFlow, baseTextColor);
-
-        return textFlow;
-    }
-
-    /**
-     * Process HTML content and add styled Text nodes to the TextFlow
-     */
-    private void processHtmlToTextFlow(String html, TextFlow textFlow, String baseTextColor) {
-        // This is a simplified HTML processor that handles basic markdown formatting
-
-        // Replace common markdown elements with styled text
-        // Handle paragraphs
-        String[] paragraphs = html.split("<p>");
-
-        for (int i = 0; i < paragraphs.length; i++) {
-            if (paragraphs[i].trim().isEmpty()) continue;
-
-            String paragraph = paragraphs[i].replaceAll("</p>.*", "");
-
-            // Handle strong/bold text
-            StringBuilder processedText = new StringBuilder();
-            int currentPos = 0;
-
-            // Process <strong> tags (bold text)
-            while (currentPos < paragraph.length()) {
-                int strongStart = paragraph.indexOf("<strong>", currentPos);
-                if (strongStart == -1) {
-                    // No more <strong> tags, add the rest of the text
-                    processedText.append(paragraph.substring(currentPos));
-                    break;
-                }
-
-                // Add text before the <strong> tag
-                processedText.append(paragraph.substring(currentPos, strongStart));
-                processedText.append("§BOLD_START§");
-
-                // Find the end of the <strong> tag
-                int strongEnd = paragraph.indexOf("</strong>", strongStart);
-                if (strongEnd == -1) {
-                    // No closing tag, treat the rest as normal text
-                    processedText.append(paragraph.substring(strongStart + 8));
-                    break;
-                }
-
-                // Add the content of the <strong> tag
-                processedText.append(paragraph.substring(strongStart + 8, strongEnd));
-                processedText.append("§BOLD_END§");
-
-                currentPos = strongEnd + 9; // Move past </strong>
-            }
-
-            // Process <em> tags (italic text)
-            paragraph = processedText.toString();
-            processedText = new StringBuilder();
-            currentPos = 0;
-
-            while (currentPos < paragraph.length()) {
-                int emStart = paragraph.indexOf("<em>", currentPos);
-                if (emStart == -1) {
-                    // No more <em> tags, add the rest of the text
-                    processedText.append(paragraph.substring(currentPos));
-                    break;
-                }
-
-                // Add text before the <em> tag
-                processedText.append(paragraph.substring(currentPos, emStart));
-                processedText.append("§ITALIC_START§");
-
-                // Find the end of the <em> tag
-                int emEnd = paragraph.indexOf("</em>", emStart);
-                if (emEnd == -1) {
-                    // No closing tag, treat the rest as normal text
-                    processedText.append(paragraph.substring(emStart + 4));
-                    break;
-                }
-
-                // Add the content of the <em> tag
-                processedText.append(paragraph.substring(emStart + 4, emEnd));
-                processedText.append("§ITALIC_END§");
-
-                currentPos = emEnd + 5; // Move past </em>
-            }
-
-            // Process <code> tags (code text)
-            paragraph = processedText.toString();
-            processedText = new StringBuilder();
-            currentPos = 0;
-
-            while (currentPos < paragraph.length()) {
-                int codeStart = paragraph.indexOf("<code>", currentPos);
-                if (codeStart == -1) {
-                    // No more <code> tags, add the rest of the text
-                    processedText.append(paragraph.substring(currentPos));
-                    break;
-                }
-
-                // Add text before the <code> tag
-                processedText.append(paragraph.substring(currentPos, codeStart));
-                processedText.append("§CODE_START§");
-
-                // Find the end of the <code> tag
-                int codeEnd = paragraph.indexOf("</code>", codeStart);
-                if (codeEnd == -1) {
-                    // No closing tag, treat the rest as normal text
-                    processedText.append(paragraph.substring(codeStart + 6));
-                    break;
-                }
-
-                // Add the content of the <code> tag
-                processedText.append(paragraph.substring(codeStart + 6, codeEnd));
-                processedText.append("§CODE_END§");
-
-                currentPos = codeEnd + 7; // Move past </code>
-            }
-
-            // Remove any remaining HTML tags
-            String cleanText = processedText.toString().replaceAll("<[^>]*>", "");
-
-            // Split by our custom markers and create styled Text nodes
-            String[] parts = cleanText.split("(§BOLD_START§|§BOLD_END§|§ITALIC_START§|§ITALIC_END§|§CODE_START§|§CODE_END§)");
-            boolean isBold = false;
-            boolean isItalic = false;
-            boolean isCode = false;
-
-            for (int j = 0; j < parts.length; j++) {
-                if (parts[j].isEmpty()) continue;
-
-                Text text = new Text(parts[j]);
-
-                // Apply base style
-                StringBuilder style = new StringBuilder("-fx-fill: " + baseTextColor + ";");
-
-                // Apply formatting
-                if (isBold) {
-                    style.append(" -fx-font-weight: bold;");
-                }
-                if (isItalic) {
-                    style.append(" -fx-font-style: italic;");
-                }
-                if (isCode) {
-                    style.append(" -fx-font-family: monospace; -fx-background-color: rgba(0,0,0,0.1); -fx-padding: 2;");
-                }
-
-                text.setStyle(style.toString());
-                textFlow.getChildren().add(text);
-
-                // Toggle formatting for next part
-                if (j < parts.length - 1) {
-                    if (cleanText.contains("§BOLD_START§" + parts[j] + "§BOLD_END§")) {
-                        isBold = !isBold;
-                    } else if (cleanText.contains("§ITALIC_START§" + parts[j] + "§ITALIC_END§")) {
-                        isItalic = !isItalic;
-                    } else if (cleanText.contains("§CODE_START§" + parts[j] + "§CODE_END§")) {
-                        isCode = !isCode;
-                    }
-                }
-            }
-
-            // Add a newline between paragraphs if not the last paragraph
-            if (i < paragraphs.length - 1) {
-                textFlow.getChildren().add(new Text("\n"));
-            }
-        }
-
-        // If no content was added (e.g., if HTML processing failed), add the original text
-        if (textFlow.getChildren().isEmpty()) {
-            Text fallbackText = new Text(html.replaceAll("<[^>]*>", ""));
-            fallbackText.setStyle("-fx-fill: " + baseTextColor + ";");
-            textFlow.getChildren().add(fallbackText);
-        }
-    }
-
-    // Custom cell for message list
     private class MessageListCell extends ListCell<Message> {
         @Override
         protected void updateItem(Message message, boolean empty) {
@@ -859,34 +942,234 @@ public class MainController implements Initializable {
                 setGraphic(null);
                 setStyle("");
             } else {
-                VBox messageBox = new VBox(5);
-                messageBox.setPadding(new Insets(10));
-
-                // Message bubble
-                HBox bubbleContainer = new HBox();
-
-                // Render markdown content
-                TextFlow textFlow = renderMarkdown(message.getContent(), message.isFromUser());
-
-                // Time label
-                Label timeLabel = new Label(message.getTimestamp().format(timeFormatter));
-                timeLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666666;");
-
-                if (message.isFromUser()) {
-                    bubbleContainer.setAlignment(Pos.CENTER_RIGHT);
-                    timeLabel.setAlignment(Pos.CENTER_RIGHT);
-                    messageBox.setAlignment(Pos.CENTER_RIGHT);
-                } else {
-                    bubbleContainer.setAlignment(Pos.CENTER_LEFT);
-                    timeLabel.setAlignment(Pos.CENTER_LEFT);
-                    messageBox.setAlignment(Pos.CENTER_LEFT);
-                }
-
-                bubbleContainer.getChildren().add(textFlow);
-                messageBox.getChildren().addAll(bubbleContainer, timeLabel);
-
-                setGraphic(messageBox);
+                setGraphic(createMessageCell(message));
             }
         }
+        
+        /**
+         * Creates the visual content for a message cell.
+         */
+        private VBox createMessageCell(Message message) {
+            VBox messageBox = new VBox(5);
+            messageBox.setPadding(new Insets(MESSAGE_BUBBLE_PADDING));
+
+            HBox bubbleContainer = createMessageBubble(message);
+            Label timeLabel = createTimeLabel(message);
+
+            // Align based on sender
+            if (message.isFromUser()) {
+                alignRight(messageBox, bubbleContainer, timeLabel);
+            } else {
+                alignLeft(messageBox, bubbleContainer, timeLabel);
+            }
+
+            messageBox.getChildren().addAll(bubbleContainer, timeLabel);
+            return messageBox;
+        }
+        
+        /**
+         * Creates the message bubble with rendered content.
+         */
+        private HBox createMessageBubble(Message message) {
+            HBox bubbleContainer = new HBox();
+            TextFlow textFlow = renderMarkdown(message.getContent(), message.isFromUser());
+            bubbleContainer.getChildren().add(textFlow);
+            return bubbleContainer;
+        }
+        
+        /**
+         * Creates a time label for the message.
+         */
+        private Label createTimeLabel(Message message) {
+            Label timeLabel = new Label(message.getTimestamp().format(timeFormatter));
+            timeLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666666;");
+            return timeLabel;
+        }
+        
+        /**
+         * Aligns components to the right for user messages.
+         */
+        private void alignRight(VBox messageBox, HBox bubbleContainer, Label timeLabel) {
+            bubbleContainer.setAlignment(Pos.CENTER_RIGHT);
+            timeLabel.setAlignment(Pos.CENTER_RIGHT);
+            messageBox.setAlignment(Pos.CENTER_RIGHT);
+        }
+        
+        /**
+         * Aligns components to the left for AI messages.
+         */
+        private void alignLeft(VBox messageBox, HBox bubbleContainer, Label timeLabel) {
+            bubbleContainer.setAlignment(Pos.CENTER_LEFT);
+            timeLabel.setAlignment(Pos.CENTER_LEFT);
+            messageBox.setAlignment(Pos.CENTER_LEFT);
+        }
+    }
+
+    // ===== Markdown Rendering =====
+    
+    /**
+     * Converts markdown text to JavaFX nodes for display.
+     */
+    private TextFlow renderMarkdown(String markdownText, boolean isUserMessage) {
+        // Create parser and parse markdown
+        Parser parser = Parser.builder().build();
+        org.commonmark.node.Node document = parser.parse(markdownText);
+
+        // Create TextFlow for formatted text
+        TextFlow textFlow = new TextFlow();
+        textFlow.setPadding(new Insets(MESSAGE_BUBBLE_PADDING, 15, MESSAGE_BUBBLE_PADDING, 15));
+        textFlow.setMaxWidth(MESSAGE_BUBBLE_MAX_WIDTH);
+
+        // Apply style based on message sender
+        String style = isUserMessage ? USER_MESSAGE_STYLE : AI_MESSAGE_STYLE;
+        textFlow.setStyle(style);
+
+        // Determine text color
+        String textColor = isUserMessage ? USER_TEXT_COLOR : AI_TEXT_COLOR;
+
+        // Convert to HTML and process
+        HtmlRenderer renderer = HtmlRenderer.builder().build();
+        String html = renderer.render(document);
+        processHtmlToTextFlow(html, textFlow, textColor);
+
+        return textFlow;
+    }
+
+    /**
+     * Processes HTML content and adds styled Text nodes to the TextFlow.
+     * This is a simplified processor that handles basic markdown formatting.
+     */
+    private void processHtmlToTextFlow(String html, TextFlow textFlow, String baseTextColor) {
+        // Replace common markdown elements with styled text
+        String[] paragraphs = html.split("<p>");
+
+        for (int i = 0; i < paragraphs.length; i++) {
+            if (paragraphs[i].trim().isEmpty()) continue;
+
+            String paragraph = paragraphs[i].replaceAll("</p>.*", "");
+            processFormattedText(paragraph, textFlow, baseTextColor);
+
+            // Add newline between paragraphs
+            if (i < paragraphs.length - 1) {
+                textFlow.getChildren().add(new Text("\n"));
+            }
+        }
+
+        // Fallback if no content was added
+        if (textFlow.getChildren().isEmpty()) {
+            Text fallbackText = new Text(html.replaceAll("<[^>]*>", ""));
+            fallbackText.setStyle("-fx-fill: " + baseTextColor + ";");
+            textFlow.getChildren().add(fallbackText);
+        }
+    }
+    
+    /**
+     * Processes text with HTML formatting tags and creates styled Text nodes.
+     */
+    private void processFormattedText(String htmlText, TextFlow textFlow, String baseTextColor) {
+        // Process strong/bold tags
+        String processedText = processHtmlTag(htmlText, "strong", "§BOLD_START§", "§BOLD_END§");
+        
+        // Process em/italic tags
+        processedText = processHtmlTag(processedText, "em", "§ITALIC_START§", "§ITALIC_END§");
+        
+        // Process code tags
+        processedText = processHtmlTag(processedText, "code", "§CODE_START§", "§CODE_END§");
+        
+        // Remove remaining HTML tags
+        String cleanText = processedText.replaceAll("<[^>]*>", "");
+        
+        // Create styled text nodes
+        createStyledTextNodes(cleanText, textFlow, baseTextColor);
+    }
+    
+    /**
+     * Processes a specific HTML tag and replaces it with custom markers.
+     */
+    private String processHtmlTag(String text, String tagName, String startMarker, String endMarker) {
+        String openTag = "<" + tagName + ">";
+        String closeTag = "</" + tagName + ">";
+        
+        StringBuilder result = new StringBuilder();
+        int currentPos = 0;
+        
+        while (currentPos < text.length()) {
+            int tagStart = text.indexOf(openTag, currentPos);
+            if (tagStart == -1) {
+                result.append(text.substring(currentPos));
+                break;
+            }
+            
+            result.append(text.substring(currentPos, tagStart));
+            result.append(startMarker);
+            
+            int tagEnd = text.indexOf(closeTag, tagStart);
+            if (tagEnd == -1) {
+                result.append(text.substring(tagStart + openTag.length()));
+                break;
+            }
+            
+            result.append(text.substring(tagStart + openTag.length(), tagEnd));
+            result.append(endMarker);
+            
+            currentPos = tagEnd + closeTag.length();
+        }
+        
+        return result.toString();
+    }
+    
+    /**
+     * Creates styled Text nodes based on formatting markers.
+     */
+    private void createStyledTextNodes(String markedText, TextFlow textFlow, String baseTextColor) {
+        String[] parts = markedText.split("(§BOLD_START§|§BOLD_END§|§ITALIC_START§|§ITALIC_END§|§CODE_START§|§CODE_END§)");
+        
+        boolean isBold = false;
+        boolean isItalic = false;
+        boolean isCode = false;
+        
+        for (String part : parts) {
+            if (part.isEmpty()) continue;
+            
+            // Check for format changes
+            if (markedText.contains("§BOLD_START§" + part)) {
+                isBold = true;
+            } else if (markedText.contains(part + "§BOLD_END§")) {
+                isBold = false;
+            } else if (markedText.contains("§ITALIC_START§" + part)) {
+                isItalic = true;
+            } else if (markedText.contains(part + "§ITALIC_END§")) {
+                isItalic = false;
+            } else if (markedText.contains("§CODE_START§" + part)) {
+                isCode = true;
+            } else if (markedText.contains(part + "§CODE_END§")) {
+                isCode = false;
+            }
+            
+            // Create styled text
+            Text text = new Text(part);
+            String style = buildTextStyle(baseTextColor, isBold, isItalic, isCode);
+            text.setStyle(style);
+            textFlow.getChildren().add(text);
+        }
+    }
+    
+    /**
+     * Builds a style string based on formatting flags.
+     */
+    private String buildTextStyle(String baseColor, boolean isBold, boolean isItalic, boolean isCode) {
+        StringBuilder style = new StringBuilder("-fx-fill: " + baseColor + ";");
+        
+        if (isBold) {
+            style.append(" -fx-font-weight: bold;");
+        }
+        if (isItalic) {
+            style.append(" -fx-font-style: italic;");
+        }
+        if (isCode) {
+            style.append(" -fx-font-family: monospace; -fx-background-color: rgba(0,0,0,0.1); -fx-padding: 2;");
+        }
+        
+        return style.toString();
     }
 }
