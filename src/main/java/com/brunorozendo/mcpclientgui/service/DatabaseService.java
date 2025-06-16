@@ -27,85 +27,27 @@ public class DatabaseService {
     private static final Logger logger = LoggerFactory.getLogger(DatabaseService.class);
     
     // Database configuration
-    private static final String DB_NAME = "mcp_client_gui.db";
-    private static final String DB_DIRECTORY_NAME = ".mcp-client-gui";
-    private static final String JDBC_PREFIX = "jdbc:sqlite:";
-    private static final String SQLITE_DRIVER = "org.sqlite.JDBC";
+    private static final String DATABASE_NAME = "mcp_client_gui.db";
+    private static final String DATABASE_DIRECTORY = ".mcp-client-gui";
+    private static final String JDBC_URL_PREFIX = "jdbc:sqlite:";
+    private static final String SQLITE_DRIVER_CLASS = "org.sqlite.JDBC";
     
-    // SQL Queries - Chats
-    private static final String CREATE_CHATS_TABLE = """
-        CREATE TABLE IF NOT EXISTS chats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            llm_model_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """;
-    
-    // SQL Queries - Messages
-    private static final String CREATE_MESSAGES_TABLE = """
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            from_user BOOLEAN NOT NULL,
-            timestamp TIMESTAMP NOT NULL,
-            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
-        )
-        """;
-    
-    // SQL Queries - Settings
-    private static final String CREATE_SETTINGS_TABLE = """
-        CREATE TABLE IF NOT EXISTS app_settings (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            llm_model TEXT,
-            mcp_config_file TEXT,
-            ollama_base_url TEXT,
-            default_llm_model_name TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """;
-    
-    // SQL Queries - LLM Models
-    private static final String CREATE_LLM_MODELS_TABLE = """
-        CREATE TABLE IF NOT EXISTS llm_models (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            is_default BOOLEAN NOT NULL DEFAULT 0
-        )
-        """;
+    // Default values
+    private static final String DEFAULT_MODEL_NAME = "qwen3:14b";
     
     // Singleton instance
     private static DatabaseService instance;
     
     // Database connection
     private Connection connection;
-    private final String dbPath;
+    private final String databasePath;
 
     /**
      * Private constructor for singleton pattern.
-     * Initializes the database connection and creates tables if needed.
      */
     private DatabaseService() {
-        this.dbPath = createDatabasePath();
+        this.databasePath = createDatabasePath();
         initializeDatabase();
-    }
-    
-    /**
-     * Creates the database directory and returns the full database path.
-     * 
-     * @return The absolute path to the database file
-     */
-    private String createDatabasePath() {
-        String userHome = System.getProperty("user.home");
-        File dbDir = new File(userHome, DB_DIRECTORY_NAME);
-        
-        if (!dbDir.exists() && !dbDir.mkdirs()) {
-            logger.warn("Failed to create database directory: {}", dbDir.getAbsolutePath());
-        }
-        
-        return new File(dbDir, DB_NAME).getAbsolutePath();
     }
 
     /**
@@ -119,6 +61,26 @@ public class DatabaseService {
         }
         return instance;
     }
+    
+    /**
+     * Creates the database directory and returns the full database path.
+     * 
+     * @return The absolute path to the database file
+     */
+    private String createDatabasePath() {
+        String userHome = System.getProperty("user.home");
+        File databaseDirectory = new File(userHome, DATABASE_DIRECTORY);
+        
+        if (!databaseDirectory.exists()) {
+            boolean created = databaseDirectory.mkdirs();
+            if (!created) {
+                logger.warn("Failed to create database directory: {}", databaseDirectory.getAbsolutePath());
+            }
+        }
+        
+        File databaseFile = new File(databaseDirectory, DATABASE_NAME);
+        return databaseFile.getAbsolutePath();
+    }
 
     /**
      * Initializes the database connection and creates necessary tables.
@@ -127,113 +89,119 @@ public class DatabaseService {
      */
     private void initializeDatabase() {
         try {
-            // Load SQLite JDBC driver
-            Class.forName(SQLITE_DRIVER);
-            
-            // Connect to database
-            connection = DriverManager.getConnection(JDBC_PREFIX + dbPath);
-            logger.info("Connected to database at: {}", dbPath);
-            
-            // Create tables if they don't exist
-            createTables();
+            loadSQLiteDriver();
+            establishConnection();
+            createTablesIfNeeded();
+            performDataMigrations();
         } catch (Exception e) {
-            logger.error("Error initializing database", e);
-            throw new RuntimeException("Failed to initialize database", e);
+            logger.error("Failed to initialize database", e);
+            throw new RuntimeException("Database initialization failed", e);
         }
+    }
+    
+    /**
+     * Loads the SQLite JDBC driver.
+     * 
+     * @throws ClassNotFoundException if driver is not found
+     */
+    private void loadSQLiteDriver() throws ClassNotFoundException {
+        Class.forName(SQLITE_DRIVER_CLASS);
+        logger.debug("SQLite JDBC driver loaded successfully");
+    }
+    
+    /**
+     * Establishes connection to the database.
+     * 
+     * @throws SQLException if connection fails
+     */
+    private void establishConnection() throws SQLException {
+        String jdbcUrl = JDBC_URL_PREFIX + databasePath;
+        connection = DriverManager.getConnection(jdbcUrl);
+        logger.info("Connected to database at: {}", databasePath);
     }
 
     /**
-     * Creates all necessary database tables.
+     * Creates all necessary database tables if they don't exist.
      * 
      * @throws SQLException if table creation fails
      */
-    private void createTables() throws SQLException {
-        try (Statement stmt = connection.createStatement()) {
-            stmt.execute(CREATE_CHATS_TABLE);
-            stmt.execute(CREATE_MESSAGES_TABLE);
-            stmt.execute(CREATE_SETTINGS_TABLE);
-            stmt.execute(CREATE_LLM_MODELS_TABLE);
-            
-            // Perform any necessary data migrations
-            migrateExistingData();
+    private void createTablesIfNeeded() throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(DatabaseQueries.CREATE_CHATS_TABLE);
+            statement.execute(DatabaseQueries.CREATE_MESSAGES_TABLE);
+            statement.execute(DatabaseQueries.CREATE_SETTINGS_TABLE);
+            statement.execute(DatabaseQueries.CREATE_LLM_MODELS_TABLE);
             
             logger.info("Database tables created/verified successfully");
         }
     }
     
     /**
-     * Migrates existing data to new schema if needed.
-     * Currently handles migration of old single-model format to multi-model format.
+     * Performs any necessary data migrations.
      * 
      * @throws SQLException if migration fails
      */
-    private void migrateExistingData() throws SQLException {
-        // Check if migration is needed
-        if (isAlreadyMigrated()) {
+    private void performDataMigrations() throws SQLException {
+        if (!needsMigration()) {
             return;
         }
         
-        // Migrate old single model to new models table
-        String oldModel = getOldModelFromSettings();
-        if (oldModel != null && !oldModel.trim().isEmpty()) {
-            migrateOldModel(oldModel);
+        String oldModelName = getOldModelName();
+        if (oldModelName != null && !oldModelName.trim().isEmpty()) {
+            migrateToNewModelFormat(oldModelName);
         }
     }
     
     /**
-     * Checks if the database has already been migrated.
+     * Checks if database needs migration.
      * 
-     * @return True if migration has been completed
-     * @throws SQLException if query fails
+     * @return true if migration is needed
+     * @throws SQLException if check fails
      */
-    private boolean isAlreadyMigrated() throws SQLException {
-        String query = "SELECT COUNT(*) FROM llm_models";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(query)) {
-            return rs.next() && rs.getInt(1) > 0;
+    private boolean needsMigration() throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.COUNT_MODELS)) {
+            return resultSet.next() && resultSet.getInt(1) == 0;
         }
     }
     
     /**
-     * Gets the old model name from the settings table.
+     * Gets the old model name from settings table.
      * 
-     * @return The old model name, or null if not found
+     * @return the old model name or null
      * @throws SQLException if query fails
      */
-    private String getOldModelFromSettings() throws SQLException {
-        String query = "SELECT llm_model FROM app_settings WHERE id = 1";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(query)) {
-            if (rs.next()) {
-                return rs.getString("llm_model");
+    private String getOldModelName() throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.SELECT_OLD_MODEL)) {
+            if (resultSet.next()) {
+                return resultSet.getString("llm_model");
             }
         }
         return null;
     }
     
     /**
-     * Migrates an old model to the new models table.
+     * Migrates old single-model format to new multi-model format.
      * 
-     * @param oldModel The model name to migrate
+     * @param oldModelName the model name to migrate
      * @throws SQLException if migration fails
      */
-    private void migrateOldModel(String oldModel) throws SQLException {
+    private void migrateToNewModelFormat(String oldModelName) throws SQLException {
         // Insert model into new table
-        String insertModel = "INSERT OR IGNORE INTO llm_models (name, is_default) VALUES (?, ?)";
-        try (PreparedStatement pstmt = connection.prepareStatement(insertModel)) {
-            pstmt.setString(1, oldModel);
-            pstmt.setBoolean(2, true);
-            pstmt.executeUpdate();
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.INSERT_MODEL_IF_NOT_EXISTS)) {
+            statement.setString(1, oldModelName);
+            statement.setBoolean(2, true);
+            statement.executeUpdate();
         }
         
         // Update settings with default model name
-        String updateSettings = "UPDATE app_settings SET default_llm_model_name = ? WHERE id = 1";
-        try (PreparedStatement pstmt = connection.prepareStatement(updateSettings)) {
-            pstmt.setString(1, oldModel);
-            pstmt.executeUpdate();
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.UPDATE_DEFAULT_MODEL_NAME)) {
+            statement.setString(1, oldModelName);
+            statement.executeUpdate();
         }
         
-        logger.info("Migrated old model '{}' to new format", oldModel);
+        logger.info("Migrated old model '{}' to new format", oldModelName);
     }
 
     // ===== Chat Operations =====
@@ -246,30 +214,30 @@ public class DatabaseService {
      * @return The saved chat with updated ID if newly created
      */
     public Chat saveChat(Chat chat) {
-        Objects.requireNonNull(chat, "Chat cannot be null");
+        validateNotNull(chat, "Chat");
         
         if (chat.getId() == null) {
-            return insertChat(chat);
+            return createNewChat(chat);
         } else {
-            return updateChat(chat);
+            return updateExistingChat(chat);
         }
     }
 
     /**
-     * Inserts a new chat into the database.
+     * Creates a new chat in the database.
      * 
-     * @param chat The chat to insert
+     * @param chat The chat to create
      * @return The chat with its generated ID
      */
-    private Chat insertChat(Chat chat) {
-        String sql = "INSERT INTO chats (name, llm_model_name) VALUES (?, ?)";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            pstmt.setString(1, chat.getName());
-            pstmt.setString(2, chat.getLlmModelName());
-            pstmt.executeUpdate();
+    private Chat createNewChat(Chat chat) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                DatabaseQueries.INSERT_CHAT, Statement.RETURN_GENERATED_KEYS)) {
             
-            try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
+            statement.setString(1, chat.getName());
+            statement.setString(2, chat.getLlmModelName());
+            statement.executeUpdate();
+            
+            try (ResultSet generatedKeys = statement.getGeneratedKeys()) {
                 if (generatedKeys.next()) {
                     chat.setId(generatedKeys.getLong(1));
                 }
@@ -277,8 +245,9 @@ public class DatabaseService {
             
             logger.info("Created new chat with ID: {}", chat.getId());
             return chat;
+            
         } catch (SQLException e) {
-            logger.error("Error creating chat", e);
+            logger.error("Failed to create chat", e);
             throw new RuntimeException("Failed to create chat", e);
         }
     }
@@ -289,15 +258,13 @@ public class DatabaseService {
      * @param chat The chat to update
      * @return The updated chat
      */
-    private Chat updateChat(Chat chat) {
-        String sql = "UPDATE chats SET name = ?, llm_model_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, chat.getName());
-            pstmt.setString(2, chat.getLlmModelName());
-            pstmt.setLong(3, chat.getId());
+    private Chat updateExistingChat(Chat chat) {
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.UPDATE_CHAT)) {
+            statement.setString(1, chat.getName());
+            statement.setString(2, chat.getLlmModelName());
+            statement.setLong(3, chat.getId());
             
-            int rowsAffected = pstmt.executeUpdate();
+            int rowsAffected = statement.executeUpdate();
             if (rowsAffected == 0) {
                 logger.warn("No chat found with ID: {}", chat.getId());
             } else {
@@ -305,8 +272,9 @@ public class DatabaseService {
             }
             
             return chat;
+            
         } catch (SQLException e) {
-            logger.error("Error updating chat", e);
+            logger.error("Failed to update chat", e);
             throw new RuntimeException("Failed to update chat", e);
         }
     }
@@ -317,21 +285,20 @@ public class DatabaseService {
      * @param chatId The ID of the chat to delete
      */
     public void deleteChat(Long chatId) {
-        Objects.requireNonNull(chatId, "Chat ID cannot be null");
+        validateNotNull(chatId, "Chat ID");
         
-        String sql = "DELETE FROM chats WHERE id = ?";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, chatId);
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.DELETE_CHAT)) {
+            statement.setLong(1, chatId);
             
-            int rowsAffected = pstmt.executeUpdate();
+            int rowsAffected = statement.executeUpdate();
             if (rowsAffected > 0) {
                 logger.info("Deleted chat with ID: {}", chatId);
             } else {
                 logger.warn("No chat found with ID: {}", chatId);
             }
+            
         } catch (SQLException e) {
-            logger.error("Error deleting chat", e);
+            logger.error("Failed to delete chat", e);
             throw new RuntimeException("Failed to delete chat", e);
         }
     }
@@ -343,27 +310,38 @@ public class DatabaseService {
      */
     public List<Chat> getAllChats() {
         List<Chat> chats = new ArrayList<>();
-        String sql = "SELECT id, name, llm_model_name FROM chats ORDER BY updated_at DESC";
         
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.SELECT_ALL_CHATS)) {
             
-            while (rs.next()) {
-                Chat chat = new Chat(
-                    rs.getLong("id"), 
-                    rs.getString("name"), 
-                    rs.getString("llm_model_name")
-                );
+            while (resultSet.next()) {
+                Chat chat = extractChatFromResultSet(resultSet);
                 chats.add(chat);
             }
             
             logger.debug("Loaded {} chats from database", chats.size());
+            
         } catch (SQLException e) {
-            logger.error("Error loading chats", e);
+            logger.error("Failed to load chats", e);
             throw new RuntimeException("Failed to load chats", e);
         }
         
         return chats;
+    }
+    
+    /**
+     * Extracts a Chat object from a ResultSet.
+     * 
+     * @param resultSet The result set to extract from
+     * @return The extracted Chat
+     * @throws SQLException if extraction fails
+     */
+    private Chat extractChatFromResultSet(ResultSet resultSet) throws SQLException {
+        return new Chat(
+            resultSet.getLong("id"), 
+            resultSet.getString("name"), 
+            resultSet.getString("llm_model_name")
+        );
     }
 
     // ===== Message Operations =====
@@ -376,50 +354,48 @@ public class DatabaseService {
      * @return The saved message with its generated ID
      */
     public Message saveMessage(Message message, Long chatId) {
-        Objects.requireNonNull(message, "Message cannot be null");
-        Objects.requireNonNull(chatId, "Chat ID cannot be null");
+        validateNotNull(message, "Message");
+        validateNotNull(chatId, "Chat ID");
         
-        String sql = "INSERT INTO messages (chat_id, content, from_user, timestamp) VALUES (?, ?, ?, ?)";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            pstmt.setLong(1, chatId);
-            pstmt.setString(2, message.getContent());
-            pstmt.setBoolean(3, message.isFromUser());
-            pstmt.setTimestamp(4, Timestamp.valueOf(message.getTimestamp()));
-            pstmt.executeUpdate();
+        try (PreparedStatement statement = connection.prepareStatement(
+                DatabaseQueries.INSERT_MESSAGE, Statement.RETURN_GENERATED_KEYS)) {
             
-            try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
+            statement.setLong(1, chatId);
+            statement.setString(2, message.getContent());
+            statement.setBoolean(3, message.isFromUser());
+            statement.setTimestamp(4, Timestamp.valueOf(message.getTimestamp()));
+            statement.executeUpdate();
+            
+            try (ResultSet generatedKeys = statement.getGeneratedKeys()) {
                 if (generatedKeys.next()) {
                     message.setId(generatedKeys.getLong(1));
                     message.setChatId(chatId);
                 }
             }
             
-            // Update chat's updated_at timestamp
-            updateChatTimestamp(chatId);
+            updateChatLastModified(chatId);
             
             logger.debug("Saved message with ID: {} for chat: {}", message.getId(), chatId);
             return message;
+            
         } catch (SQLException e) {
-            logger.error("Error saving message", e);
+            logger.error("Failed to save message", e);
             throw new RuntimeException("Failed to save message", e);
         }
     }
-
+    
     /**
-     * Updates the last updated timestamp for a chat.
+     * Updates the last modified timestamp for a chat.
      * 
      * @param chatId The ID of the chat to update
      */
-    private void updateChatTimestamp(Long chatId) {
-        String sql = "UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, chatId);
-            pstmt.executeUpdate();
+    private void updateChatLastModified(Long chatId) {
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.UPDATE_CHAT_TIMESTAMP)) {
+            statement.setLong(1, chatId);
+            statement.executeUpdate();
         } catch (SQLException e) {
-            logger.error("Error updating chat timestamp", e);
-            // Don't throw exception as this is not critical
+            logger.error("Failed to update chat timestamp", e);
+            // Non-critical error, don't throw exception
         }
     }
 
@@ -430,34 +406,46 @@ public class DatabaseService {
      * @return List of messages ordered by timestamp
      */
     public List<Message> getMessagesForChat(Long chatId) {
-        Objects.requireNonNull(chatId, "Chat ID cannot be null");
+        validateNotNull(chatId, "Chat ID");
         
         List<Message> messages = new ArrayList<>();
-        String sql = "SELECT id, content, from_user, timestamp FROM messages WHERE chat_id = ? ORDER BY timestamp ASC";
         
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, chatId);
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.SELECT_MESSAGES_FOR_CHAT)) {
+            statement.setLong(1, chatId);
             
-            try (ResultSet rs = pstmt.executeQuery()) {
-                while (rs.next()) {
-                    Message message = new Message(
-                        rs.getLong("id"),
-                        chatId,
-                        rs.getString("content"),
-                        rs.getBoolean("from_user"),
-                        rs.getTimestamp("timestamp").toLocalDateTime()
-                    );
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    Message message = extractMessageFromResultSet(resultSet, chatId);
                     messages.add(message);
                 }
             }
             
             logger.debug("Loaded {} messages for chat: {}", messages.size(), chatId);
+            
         } catch (SQLException e) {
-            logger.error("Error loading messages for chat: {}", chatId, e);
+            logger.error("Failed to load messages for chat: {}", chatId, e);
             throw new RuntimeException("Failed to load messages", e);
         }
         
         return messages;
+    }
+    
+    /**
+     * Extracts a Message object from a ResultSet.
+     * 
+     * @param resultSet The result set to extract from
+     * @param chatId The chat ID for the message
+     * @return The extracted Message
+     * @throws SQLException if extraction fails
+     */
+    private Message extractMessageFromResultSet(ResultSet resultSet, Long chatId) throws SQLException {
+        return new Message(
+            resultSet.getLong("id"),
+            chatId,
+            resultSet.getString("content"),
+            resultSet.getBoolean("from_user"),
+            resultSet.getTimestamp("timestamp").toLocalDateTime()
+        );
     }
 
     /**
@@ -466,17 +454,16 @@ public class DatabaseService {
      * @param chatId The ID of the chat whose messages to delete
      */
     public void deleteMessagesForChat(Long chatId) {
-        Objects.requireNonNull(chatId, "Chat ID cannot be null");
+        validateNotNull(chatId, "Chat ID");
         
-        String sql = "DELETE FROM messages WHERE chat_id = ?";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, chatId);
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.DELETE_MESSAGES_FOR_CHAT)) {
+            statement.setLong(1, chatId);
             
-            int rowsAffected = pstmt.executeUpdate();
+            int rowsAffected = statement.executeUpdate();
             logger.info("Deleted {} messages for chat: {}", rowsAffected, chatId);
+            
         } catch (SQLException e) {
-            logger.error("Error deleting messages", e);
+            logger.error("Failed to delete messages", e);
             throw new RuntimeException("Failed to delete messages", e);
         }
     }
@@ -489,18 +476,17 @@ public class DatabaseService {
      * @param model The model to save
      */
     public void saveLlmModel(AppSettings.LlmModel model) {
-        Objects.requireNonNull(model, "LLM model cannot be null");
+        validateNotNull(model, "LLM model");
         
-        String sql = "INSERT OR REPLACE INTO llm_models (name, is_default) VALUES (?, ?)";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, model.getName());
-            pstmt.setBoolean(2, model.isDefault());
-            pstmt.executeUpdate();
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.INSERT_OR_REPLACE_MODEL)) {
+            statement.setString(1, model.getName());
+            statement.setBoolean(2, model.isDefault());
+            statement.executeUpdate();
             
             logger.info("Saved LLM model: {}", model.getName());
+            
         } catch (SQLException e) {
-            logger.error("Error saving LLM model", e);
+            logger.error("Failed to save LLM model", e);
             throw new RuntimeException("Failed to save LLM model", e);
         }
     }
@@ -511,21 +497,20 @@ public class DatabaseService {
      * @param modelName The name of the model to delete
      */
     public void deleteLlmModel(String modelName) {
-        Objects.requireNonNull(modelName, "Model name cannot be null");
+        validateNotNull(modelName, "Model name");
         
-        String sql = "DELETE FROM llm_models WHERE name = ?";
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, modelName);
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.DELETE_MODEL)) {
+            statement.setString(1, modelName);
             
-            int rowsAffected = pstmt.executeUpdate();
+            int rowsAffected = statement.executeUpdate();
             if (rowsAffected > 0) {
                 logger.info("Deleted LLM model: {}", modelName);
             } else {
                 logger.warn("No LLM model found with name: {}", modelName);
             }
+            
         } catch (SQLException e) {
-            logger.error("Error deleting LLM model", e);
+            logger.error("Failed to delete LLM model", e);
             throw new RuntimeException("Failed to delete LLM model", e);
         }
     }
@@ -537,26 +522,37 @@ public class DatabaseService {
      */
     public List<AppSettings.LlmModel> getAllLlmModels() {
         List<AppSettings.LlmModel> models = new ArrayList<>();
-        String sql = "SELECT name, is_default FROM llm_models ORDER BY name";
         
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.SELECT_ALL_MODELS)) {
             
-            while (rs.next()) {
-                AppSettings.LlmModel model = new AppSettings.LlmModel(
-                    rs.getString("name"),
-                    rs.getBoolean("is_default")
-                );
+            while (resultSet.next()) {
+                AppSettings.LlmModel model = extractModelFromResultSet(resultSet);
                 models.add(model);
             }
             
             logger.debug("Loaded {} LLM models from database", models.size());
+            
         } catch (SQLException e) {
-            logger.error("Error loading LLM models", e);
+            logger.error("Failed to load LLM models", e);
             throw new RuntimeException("Failed to load LLM models", e);
         }
         
         return models;
+    }
+    
+    /**
+     * Extracts an LlmModel object from a ResultSet.
+     * 
+     * @param resultSet The result set to extract from
+     * @return The extracted LlmModel
+     * @throws SQLException if extraction fails
+     */
+    private AppSettings.LlmModel extractModelFromResultSet(ResultSet resultSet) throws SQLException {
+        return new AppSettings.LlmModel(
+            resultSet.getString("name"),
+            resultSet.getBoolean("is_default")
+        );
     }
     
     /**
@@ -566,28 +562,17 @@ public class DatabaseService {
      * @param modelName The name of the model to set as default
      */
     public void setDefaultLlmModel(String modelName) {
-        Objects.requireNonNull(modelName, "Model name cannot be null");
+        validateNotNull(modelName, "Model name");
         
         try {
             connection.setAutoCommit(false);
             
             try {
-                // First, unset all defaults
-                String unsetSql = "UPDATE llm_models SET is_default = 0";
-                try (Statement stmt = connection.createStatement()) {
-                    stmt.executeUpdate(unsetSql);
-                }
+                // Clear all defaults
+                clearAllDefaultModels();
                 
-                // Then set the new default
-                String setSql = "UPDATE llm_models SET is_default = 1 WHERE name = ?";
-                try (PreparedStatement pstmt = connection.prepareStatement(setSql)) {
-                    pstmt.setString(1, modelName);
-                    
-                    int rowsAffected = pstmt.executeUpdate();
-                    if (rowsAffected == 0) {
-                        throw new SQLException("Model not found: " + modelName);
-                    }
-                }
+                // Set new default
+                setModelAsDefault(modelName);
                 
                 connection.commit();
                 logger.info("Set default LLM model to: {}", modelName);
@@ -598,13 +583,37 @@ public class DatabaseService {
             }
             
         } catch (SQLException e) {
-            logger.error("Error setting default LLM model", e);
+            logger.error("Failed to set default LLM model", e);
             throw new RuntimeException("Failed to set default LLM model", e);
         } finally {
-            try {
-                connection.setAutoCommit(true);
-            } catch (SQLException e) {
-                logger.error("Error resetting auto-commit", e);
+            resetAutoCommit();
+        }
+    }
+    
+    /**
+     * Clears the default flag from all models.
+     * 
+     * @throws SQLException if operation fails
+     */
+    private void clearAllDefaultModels() throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate(DatabaseQueries.UNSET_ALL_DEFAULT_MODELS);
+        }
+    }
+    
+    /**
+     * Sets a specific model as default.
+     * 
+     * @param modelName The model name
+     * @throws SQLException if operation fails or model not found
+     */
+    private void setModelAsDefault(String modelName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.SET_DEFAULT_MODEL)) {
+            statement.setString(1, modelName);
+            
+            int rowsAffected = statement.executeUpdate();
+            if (rowsAffected == 0) {
+                throw new SQLException("Model not found: " + modelName);
             }
         }
     }
@@ -620,58 +629,70 @@ public class DatabaseService {
     public AppSettings loadSettings() {
         AppSettings settings = new AppSettings();
         
-        // Load basic settings
         loadBasicSettings(settings);
-        
-        // Load LLM models
-        List<AppSettings.LlmModel> models = getAllLlmModels();
-        settings.setLlmModels(models);
-        
-        // Ensure at least one model exists
-        ensureDefaultModel(settings, models);
+        loadLlmModels(settings);
+        ensureDefaultModelExists(settings);
         
         logger.info("Loaded application settings from database");
         return settings;
     }
     
     /**
-     * Loads basic settings (MCP config, Ollama URL) from the database.
+     * Loads basic settings from the database.
      * 
      * @param settings The settings object to populate
      */
     private void loadBasicSettings(AppSettings settings) {
-        String sql = "SELECT mcp_config_file, ollama_base_url, default_llm_model_name FROM app_settings WHERE id = 1";
-        
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.SELECT_SETTINGS)) {
             
-            if (rs.next()) {
-                String mcpConfigPath = rs.getString("mcp_config_file");
-                if (mcpConfigPath != null) {
-                    settings.setMcpConfigFile(new File(mcpConfigPath));
-                }
-                
-                settings.setOllamaBaseUrl(rs.getString("ollama_base_url"));
-                settings.setDefaultLlmModelName(rs.getString("default_llm_model_name"));
+            if (resultSet.next()) {
+                extractBasicSettings(resultSet, settings);
             }
+            
         } catch (SQLException e) {
-            logger.error("Error loading settings", e);
+            logger.error("Failed to load settings", e);
             // Continue with default settings
         }
     }
     
     /**
-     * Ensures at least one default model exists in the settings.
+     * Extracts basic settings from a ResultSet.
      * 
-     * @param settings The settings to update
-     * @param models The list of loaded models
+     * @param resultSet The result set to extract from
+     * @param settings The settings object to populate
+     * @throws SQLException if extraction fails
      */
-    private void ensureDefaultModel(AppSettings settings, List<AppSettings.LlmModel> models) {
-        if (models.isEmpty()) {
-            // Create default model
-            AppSettings.LlmModel defaultModel = new AppSettings.LlmModel("qwen3:14b", true);
+    private void extractBasicSettings(ResultSet resultSet, AppSettings settings) throws SQLException {
+        String mcpConfigPath = resultSet.getString("mcp_config_file");
+        if (mcpConfigPath != null) {
+            settings.setMcpConfigFile(new File(mcpConfigPath));
+        }
+        
+        settings.setOllamaBaseUrl(resultSet.getString("ollama_base_url"));
+        settings.setDefaultLlmModelName(resultSet.getString("default_llm_model_name"));
+    }
+    
+    /**
+     * Loads LLM models into settings.
+     * 
+     * @param settings The settings object to populate
+     */
+    private void loadLlmModels(AppSettings settings) {
+        List<AppSettings.LlmModel> models = getAllLlmModels();
+        settings.setLlmModels(models);
+    }
+    
+    /**
+     * Ensures at least one default model exists.
+     * 
+     * @param settings The settings to check and update
+     */
+    private void ensureDefaultModelExists(AppSettings settings) {
+        if (settings.getLlmModels().isEmpty()) {
+            AppSettings.LlmModel defaultModel = new AppSettings.LlmModel(DEFAULT_MODEL_NAME, true);
             saveLlmModel(defaultModel);
-            models.add(defaultModel);
+            settings.getLlmModels().add(defaultModel);
             settings.setDefaultLlmModelName(defaultModel.getName());
         }
     }
@@ -682,13 +703,10 @@ public class DatabaseService {
      * @param settings The settings to save
      */
     public void saveSettings(AppSettings settings) {
-        Objects.requireNonNull(settings, "Settings cannot be null");
+        validateNotNull(settings, "Settings");
         
-        // Save basic settings
         saveBasicSettings(settings);
-        
-        // Save LLM models
-        saveLlmModels(settings);
+        saveAllModels(settings);
         
         logger.info("Saved application settings to database");
     }
@@ -699,61 +717,84 @@ public class DatabaseService {
      * @param settings The settings to save
      */
     private void saveBasicSettings(AppSettings settings) {
-        // Check if settings exist
-        boolean exists = settingsExist();
+        boolean exists = doesSettingsRecordExist();
+        String query = exists ? DatabaseQueries.UPDATE_SETTINGS : DatabaseQueries.INSERT_SETTINGS;
         
-        String sql;
-        if (exists) {
-            sql = "UPDATE app_settings SET mcp_config_file = ?, ollama_base_url = ?, " +
-                  "default_llm_model_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1";
-        } else {
-            sql = "INSERT INTO app_settings (id, mcp_config_file, ollama_base_url, default_llm_model_name) " +
-                  "VALUES (1, ?, ?, ?)";
-        }
-        
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, settings.getMcpConfigFile() != null ? 
-                settings.getMcpConfigFile().getAbsolutePath() : null);
-            pstmt.setString(2, settings.getOllamaBaseUrl());
-            pstmt.setString(3, settings.getDefaultLlmModelName());
-            pstmt.executeUpdate();
+        try (PreparedStatement statement = connection.prepareStatement(query)) {
+            populateSettingsStatement(statement, settings);
+            statement.executeUpdate();
+            
         } catch (SQLException e) {
-            logger.error("Error saving settings", e);
+            logger.error("Failed to save settings", e);
             throw new RuntimeException("Failed to save settings", e);
         }
     }
     
     /**
-     * Checks if settings already exist in the database.
+     * Checks if a settings record already exists.
      * 
-     * @return True if settings exist
+     * @return true if settings exist
      */
-    private boolean settingsExist() {
-        String checkSql = "SELECT COUNT(*) FROM app_settings WHERE id = 1";
-        
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(checkSql)) {
-            return rs.next() && rs.getInt(1) > 0;
+    private boolean doesSettingsRecordExist() {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.COUNT_SETTINGS)) {
+            return resultSet.next() && resultSet.getInt(1) > 0;
         } catch (SQLException e) {
-            logger.error("Error checking settings existence", e);
+            logger.error("Failed to check settings existence", e);
             return false;
         }
     }
     
     /**
-     * Saves all LLM models from settings.
+     * Populates a PreparedStatement with settings values.
      * 
-     * @param settings The settings containing models to save
+     * @param statement The statement to populate
+     * @param settings The settings containing values
+     * @throws SQLException if population fails
      */
-    private void saveLlmModels(AppSettings settings) {
-        // Save/update all models
+    private void populateSettingsStatement(PreparedStatement statement, AppSettings settings) throws SQLException {
+        statement.setString(1, settings.getMcpConfigFile() != null ? 
+            settings.getMcpConfigFile().getAbsolutePath() : null);
+        statement.setString(2, settings.getOllamaBaseUrl());
+        statement.setString(3, settings.getDefaultLlmModelName());
+    }
+    
+    /**
+     * Saves all models from settings.
+     * 
+     * @param settings The settings containing models
+     */
+    private void saveAllModels(AppSettings settings) {
         for (AppSettings.LlmModel model : settings.getLlmModels()) {
             saveLlmModel(model);
         }
         
-        // Update default model
         if (settings.getDefaultLlmModelName() != null) {
             setDefaultLlmModel(settings.getDefaultLlmModelName());
+        }
+    }
+    
+    // ===== Utility Methods =====
+    
+    /**
+     * Validates that an object is not null.
+     * 
+     * @param object The object to validate
+     * @param name The name of the object for error messages
+     * @throws NullPointerException if object is null
+     */
+    private void validateNotNull(Object object, String name) {
+        Objects.requireNonNull(object, name + " cannot be null");
+    }
+    
+    /**
+     * Resets auto-commit mode to true.
+     */
+    private void resetAutoCommit() {
+        try {
+            connection.setAutoCommit(true);
+        } catch (SQLException e) {
+            logger.error("Failed to reset auto-commit", e);
         }
     }
 
@@ -768,7 +809,7 @@ public class DatabaseService {
                 logger.info("Database connection closed");
             }
         } catch (SQLException e) {
-            logger.error("Error closing database connection", e);
+            logger.error("Failed to close database connection", e);
         }
     }
 }

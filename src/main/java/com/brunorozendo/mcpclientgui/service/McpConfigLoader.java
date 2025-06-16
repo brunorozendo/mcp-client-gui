@@ -3,6 +3,7 @@ package com.brunorozendo.mcpclientgui.service;
 import com.brunorozendo.mcpclientgui.model.McpConfig;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,42 +28,42 @@ public class McpConfigLoader {
     private static final Logger logger = LoggerFactory.getLogger(McpConfigLoader.class);
     
     // Configuration constants
-    private static final String CONFIG_FILE_EXTENSION = ".json";
-    private static final long MAX_CONFIG_SIZE_BYTES = 10 * 1024 * 1024; // 10MB max
+    private static final String JSON_FILE_EXTENSION = ".json";
+    private static final long MAX_FILE_SIZE_MB = 10;
+    private static final long MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
     
-    private final ObjectMapper objectMapper;
+    // Default configuration paths
+    private static final String CONFIG_FILENAME = "mcp.json";
+    private static final String CONFIG_DIR = ".config/mcp";
+    
+    private final ObjectMapper jsonMapper;
 
     /**
      * Creates a new MCP configuration loader.
      */
     public McpConfigLoader() {
-        this.objectMapper = createObjectMapper();
+        this.jsonMapper = createJsonMapper();
     }
     
     /**
-     * Creates and configures the Jackson ObjectMapper for JSON parsing.
+     * Creates and configures the Jackson JsonMapper for JSON parsing.
      * 
-     * @return Configured ObjectMapper instance
+     * @return Configured JsonMapper instance
      */
-    private ObjectMapper createObjectMapper() {
-        return new ObjectMapper()
-                // Don't fail on unknown properties (forward compatibility)
+    private ObjectMapper createJsonMapper() {
+        return JsonMapper.builder()
+                // Don't fail on unknown properties for forward compatibility
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-                // Allow comments in JSON files
+                // Allow comments in JSON files for better documentation
                 .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true)
                 // Allow trailing commas for easier editing
-                .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_TRAILING_COMMA, true);
+                .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_TRAILING_COMMA, true)
+                .build();
     }
 
     /**
      * Loads MCP configuration from the specified file.
      * 
-     * Validates that:
-     * - The file exists and is readable
-     * - The file has a .json extension
-     * - The file size is reasonable
-     * - The JSON content is valid and can be parsed
-     *
      * @param configFile The MCP configuration JSON file
      * @return A populated McpConfig object
      * @throws IllegalArgumentException if configFile is null or invalid
@@ -74,16 +75,20 @@ public class McpConfigLoader {
         logger.info("Loading MCP configuration from: {}", configFile.getAbsolutePath());
         
         try {
-            McpConfig config = objectMapper.readValue(configFile, McpConfig.class);
-            validateLoadedConfig(config);
+            McpConfig config = jsonMapper.readValue(configFile, McpConfig.class);
+            validateConfiguration(config);
             
-            logger.info("Successfully loaded MCP configuration with {} servers", 
-                       config.getMcpServers() != null ? config.getMcpServers().size() : 0);
+            int serverCount = countServers(config);
+            logger.info("Successfully loaded MCP configuration with {} servers", serverCount);
             
             return config;
         } catch (IOException e) {
-            logger.error("Failed to parse MCP configuration file: {}", configFile.getAbsolutePath(), e);
-            throw new IOException("Failed to parse MCP configuration: " + e.getMessage(), e);
+            String errorMessage = String.format(
+                "Failed to parse MCP configuration file '%s': %s",
+                configFile.getName(), e.getMessage()
+            );
+            logger.error(errorMessage, e);
+            throw new IOException(errorMessage, e);
         }
     }
     
@@ -96,12 +101,61 @@ public class McpConfigLoader {
      * @throws IOException if the file cannot be read or parsed
      */
     public McpConfig load(String configPath) throws IOException {
-        if (configPath == null || configPath.trim().isEmpty()) {
+        if (isNullOrEmpty(configPath)) {
             throw new IllegalArgumentException("Configuration file path cannot be null or empty");
         }
         
         return load(new File(configPath));
     }
+    
+    /**
+     * Attempts to load configuration from default locations.
+     * 
+     * Searches in order:
+     * 1. Current directory
+     * 2. User home directory
+     * 3. User's .config/mcp directory
+     * 
+     * @return The loaded configuration, or null if not found
+     */
+    public McpConfig loadFromDefaultLocation() {
+        String[] searchPaths = getDefaultSearchPaths();
+        
+        for (String path : searchPaths) {
+            File configFile = new File(path);
+            if (configFile.exists()) {
+                try {
+                    logger.info("Found MCP configuration at: {}", path);
+                    return load(configFile);
+                } catch (IOException e) {
+                    logger.warn("Failed to load configuration from {}: {}", 
+                               path, e.getMessage());
+                }
+            }
+        }
+        
+        logger.debug("No MCP configuration found in default locations");
+        return null;
+    }
+    
+    /**
+     * Creates a sample MCP configuration file at the specified location.
+     * 
+     * @param targetFile The file to create
+     * @throws IOException if the file cannot be written
+     */
+    public void createSampleConfiguration(File targetFile) throws IOException {
+        Objects.requireNonNull(targetFile, "Target file cannot be null");
+        
+        String sampleContent = getSampleConfigurationContent();
+        
+        Path targetPath = targetFile.toPath();
+        Files.writeString(targetPath, sampleContent);
+        
+        logger.info("Created sample MCP configuration at: {}", targetFile.getAbsolutePath());
+    }
+    
+    // ===== Validation Methods =====
     
     /**
      * Validates the configuration file before attempting to load it.
@@ -114,66 +168,52 @@ public class McpConfigLoader {
         Objects.requireNonNull(configFile, "Configuration file cannot be null");
         
         if (!configFile.exists()) {
-            String errorMsg = String.format("MCP configuration file not found: %s", 
-                                          configFile.getAbsolutePath());
-            logger.error(errorMsg);
-            throw new IOException(errorMsg);
+            throw new IOException("MCP configuration file not found: " + configFile.getAbsolutePath());
         }
         
         if (!configFile.isFile()) {
-            String errorMsg = String.format("MCP configuration path is not a file: %s", 
-                                          configFile.getAbsolutePath());
-            logger.error(errorMsg);
-            throw new IOException(errorMsg);
+            throw new IOException("Path is not a file: " + configFile.getAbsolutePath());
         }
         
         if (!configFile.canRead()) {
-            String errorMsg = String.format("MCP configuration file is not readable: %s", 
-                                          configFile.getAbsolutePath());
-            logger.error(errorMsg);
-            throw new IOException(errorMsg);
+            throw new IOException("File is not readable: " + configFile.getAbsolutePath());
         }
         
-        validateFileExtension(configFile);
-        validateFileSize(configFile);
+        checkFileExtension(configFile);
+        checkFileSize(configFile);
     }
     
     /**
-     * Validates that the file has the expected .json extension.
+     * Checks if the file has the expected .json extension.
      * 
      * @param configFile The file to check
-     * @throws IllegalArgumentException if the file doesn't have .json extension
      */
-    private void validateFileExtension(File configFile) {
+    private void checkFileExtension(File configFile) {
         String fileName = configFile.getName().toLowerCase();
-        if (!fileName.endsWith(CONFIG_FILE_EXTENSION)) {
-            logger.warn("MCP configuration file does not have .json extension: {}", 
-                       configFile.getName());
-            // We'll allow it but warn about it
+        if (!fileName.endsWith(JSON_FILE_EXTENSION)) {
+            logger.warn("Configuration file '{}' does not have {} extension", 
+                       configFile.getName(), JSON_FILE_EXTENSION);
         }
     }
     
     /**
-     * Validates that the file size is reasonable.
+     * Checks if the file size is within acceptable limits.
      * 
      * @param configFile The file to check
-     * @throws IOException if the file is too large
+     * @throws IOException if the file is too large or empty
      */
-    private void validateFileSize(File configFile) throws IOException {
+    private void checkFileSize(File configFile) throws IOException {
         long fileSize = configFile.length();
-        if (fileSize > MAX_CONFIG_SIZE_BYTES) {
-            String errorMsg = String.format(
-                "MCP configuration file is too large: %d bytes (max: %d bytes)", 
-                fileSize, MAX_CONFIG_SIZE_BYTES
-            );
-            logger.error(errorMsg);
-            throw new IOException(errorMsg);
-        }
         
         if (fileSize == 0) {
-            String errorMsg = "MCP configuration file is empty";
-            logger.error(errorMsg);
-            throw new IOException(errorMsg);
+            throw new IOException("Configuration file is empty");
+        }
+        
+        if (fileSize > MAX_FILE_SIZE_BYTES) {
+            throw new IOException(String.format(
+                "Configuration file too large: %.2f MB (max: %d MB)", 
+                fileSize / (1024.0 * 1024.0), MAX_FILE_SIZE_MB
+            ));
         }
     }
     
@@ -183,18 +223,18 @@ public class McpConfigLoader {
      * @param config The configuration to validate
      * @throws IllegalArgumentException if the configuration is invalid
      */
-    private void validateLoadedConfig(McpConfig config) {
+    private void validateConfiguration(McpConfig config) {
         if (config == null) {
             throw new IllegalArgumentException("Loaded configuration is null");
         }
         
         if (config.getMcpServers() == null || config.getMcpServers().isEmpty()) {
-            logger.warn("MCP configuration contains no server definitions");
-            // This is allowed but we warn about it
-        } else {
-            // Validate each server entry
-            config.getMcpServers().forEach(this::validateServerEntry);
+            logger.warn("Configuration contains no server definitions");
+            return;
         }
+        
+        // Validate each server entry
+        config.getMcpServers().forEach(this::validateServerEntry);
     }
     
     /**
@@ -204,66 +244,51 @@ public class McpConfigLoader {
      * @param serverEntry The server configuration entry
      */
     private void validateServerEntry(String serverName, McpConfig.McpServerEntry serverEntry) {
-        if (serverName == null || serverName.trim().isEmpty()) {
-            logger.warn("MCP configuration contains server with empty name");
+        if (isNullOrEmpty(serverName)) {
+            throw new IllegalArgumentException("Server name cannot be empty");
         }
         
         if (serverEntry == null) {
-            logger.error("MCP server '{}' has null configuration", serverName);
-            throw new IllegalArgumentException("Server '" + serverName + "' has null configuration");
+            throw new IllegalArgumentException(
+                String.format("Server '%s' has null configuration", serverName)
+            );
         }
         
-        if (serverEntry.getCommand() == null || serverEntry.getCommand().trim().isEmpty()) {
-            logger.error("MCP server '{}' has no command specified", serverName);
-            throw new IllegalArgumentException("Server '" + serverName + "' has no command specified");
+        if (isNullOrEmpty(serverEntry.getCommand())) {
+            throw new IllegalArgumentException(
+                String.format("Server '%s' has no command specified", serverName)
+            );
         }
         
-        logger.debug("Validated MCP server '{}' with command: {}", serverName, serverEntry.getCommand());
+        logger.debug("Validated server '{}' with command: {}", 
+                    serverName, serverEntry.getCommand());
     }
     
+    // ===== Helper Methods =====
+    
     /**
-     * Attempts to load configuration from a default location.
+     * Gets the default search paths for configuration files.
      * 
-     * Looks for mcp.json in common locations:
-     * - Current directory
-     * - User home directory
-     * - .config/mcp/ directory
-     * 
-     * @return The loaded configuration, or null if not found
+     * @return Array of paths to search
      */
-    public McpConfig loadFromDefaultLocation() {
-        String[] defaultPaths = {
-            "mcp.json",
-            System.getProperty("user.home") + File.separator + "mcp.json",
-            System.getProperty("user.home") + File.separator + ".config" + File.separator + "mcp" + File.separator + "mcp.json"
+    private String[] getDefaultSearchPaths() {
+        String userHome = System.getProperty("user.home");
+        String separator = File.separator;
+        
+        return new String[] {
+            CONFIG_FILENAME,  // Current directory
+            userHome + separator + CONFIG_FILENAME,  // User home
+            userHome + separator + CONFIG_DIR + separator + CONFIG_FILENAME  // Config directory
         };
-        
-        for (String path : defaultPaths) {
-            File configFile = new File(path);
-            if (configFile.exists()) {
-                try {
-                    logger.info("Found MCP configuration at default location: {}", path);
-                    return load(configFile);
-                } catch (IOException e) {
-                    logger.warn("Failed to load MCP configuration from {}: {}", path, e.getMessage());
-                }
-            }
-        }
-        
-        logger.debug("No MCP configuration found at default locations");
-        return null;
     }
     
     /**
-     * Creates a sample MCP configuration file at the specified location.
+     * Gets sample configuration content.
      * 
-     * @param targetFile The file to create
-     * @throws IOException if the file cannot be written
+     * @return Sample JSON configuration
      */
-    public void createSampleConfig(File targetFile) throws IOException {
-        Objects.requireNonNull(targetFile, "Target file cannot be null");
-        
-        String sampleConfig = """
+    private String getSampleConfigurationContent() {
+        return """
             {
               "globalSettings": {
                 "timeout": 60
@@ -275,14 +300,39 @@ public class McpConfigLoader {
                   "env": {
                     "EXAMPLE_VAR": "value"
                   }
+                },
+                "another-server": {
+                  "command": "python",
+                  "args": ["-m", "mcp_server"],
+                  "env": {
+                    "API_KEY": "your-api-key-here"
+                  }
                 }
               }
             }
             """;
-        
-        Path targetPath = targetFile.toPath();
-        Files.writeString(targetPath, sampleConfig);
-        
-        logger.info("Created sample MCP configuration at: {}", targetFile.getAbsolutePath());
+    }
+    
+    /**
+     * Counts the number of servers in the configuration.
+     * 
+     * @param config The configuration to count servers in
+     * @return The number of servers
+     */
+    private int countServers(McpConfig config) {
+        if (config.getMcpServers() == null) {
+            return 0;
+        }
+        return config.getMcpServers().size();
+    }
+    
+    /**
+     * Checks if a string is null or empty.
+     * 
+     * @param str The string to check
+     * @return true if the string is null or empty
+     */
+    private boolean isNullOrEmpty(String str) {
+        return str == null || str.trim().isEmpty();
     }
 }

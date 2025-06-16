@@ -20,4 +20,8 @@ module com.brunorozendo.mcpclientgui {
     exports com.brunorozendo.mcpclientgui;
     exports com.brunorozendo.mcpclientgui.controller;
     exports com.brunorozendo.mcpclientgui.model;
+    exports com.brunorozendo.mcpclientgui.core;
+    exports com.brunorozendo.mcpclientgui.core.chat;
+    exports com.brunorozendo.mcpclientgui.ui.components;
+    exports com.brunorozendo.mcpclientgui.ui.handlers;
 }
