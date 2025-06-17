@@ -2,6 +2,8 @@ plugins {
     id 'java'
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'org.beryx.jlink' version '3.0.1'
 }
 
 group = 'com.brunorozendo'
@@ -25,6 +27,20 @@ application {
 javafx {
     version = '21'
     modules = ['javafx.controls', 'javafx.fxml']
+}
+
+// Define the JavaFX platform
+def currentOS = org.gradle.internal.os.OperatingSystem.current()
+def platform
+if (currentOS.isWindows()) {
+    platform = 'win'
+} else if (currentOS.isLinux()) {
+    platform = 'linux'
+} else if (currentOS.isMacOsX()) {
+    platform = 'mac'
+    if (System.getProperty("os.arch") == "aarch64") {
+        platform = 'mac-aarch64'
+    }
 }
 
 dependencies {
@@ -54,8 +70,138 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
     testImplementation 'org.testfx:testfx-core:4.0.18'
     testImplementation 'org.testfx:testfx-junit5:4.0.18'
+    
+    // Add platform-specific JavaFX dependencies for the fat JAR
+    implementation "org.openjfx:javafx-base:21:$platform"
+    implementation "org.openjfx:javafx-controls:21:$platform"
+    implementation "org.openjfx:javafx-fxml:21:$platform"
+    implementation "org.openjfx:javafx-graphics:21:$platform"
 }
 
 test {
     useJUnitPlatform()
 }
+
+// Configure Shadow JAR
+shadowJar {
+    archiveBaseName = 'mcp-client-gui'
+    archiveClassifier = 'all'
+    archiveVersion = version
+    
+    manifest {
+        attributes(
+            'Main-Class': 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher',
+            'Multi-Release': 'true'
+        )
+    }
+    
+    // Merge service files
+    mergeServiceFiles()
+    
+    // Exclude module-info.class files to avoid conflicts
+    exclude 'module-info.class'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    
+    // Handle duplicate files
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Create a distribution task that builds the shadow JAR
+tasks.register('dist') {
+    dependsOn shadowJar
+    doLast {
+        println "Fat JAR created at: ${shadowJar.archiveFile.get().asFile.absolutePath}"
+    }
+}
+
+// Configure jlink for creating a custom runtime image
+jlink {
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
+    launcher {
+        name = 'mcp-client-gui'
+        mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
+    }
+    
+    // Handle automatic modules by merging them into a custom runtime
+    mergedModule {
+        requires 'java.desktop'
+        requires 'java.logging'
+        requires 'java.sql'
+        requires 'java.naming'
+        requires 'java.management'
+        requires 'java.security.jgss'
+        requires 'java.instrument'
+        
+        // Force merge all automatic modules
+        forceMerge 'slf4j.api'
+        forceMerge 'logback.classic'
+        forceMerge 'logback.core'
+        forceMerge 'commonmark'
+        forceMerge 'controlsfx'
+        forceMerge 'jackson.annotations'
+        forceMerge 'jackson.core'
+        forceMerge 'jackson.databind'
+        forceMerge 'sqlite.jdbc'
+        forceMerge 'byte.buddy'
+        forceMerge 'reactor.core'
+        forceMerge 'reactive.streams'
+        forceMerge 'mcp'
+    }
+    
+    jpackage {
+        if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+            installerOptions += ['--win-dir-chooser', '--win-menu', '--win-shortcut']
+        } else if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+            installerOptions += ['--mac-package-name', 'MCP Client GUI']
+        }
+    }
+}
+
+// Alternative: Use jpackage directly with the shadow JAR
+tasks.register('jpackageFromShadow', Exec) {
+    dependsOn shadowJar
+
+    var buildPath = project.layout.buildDirectory.get().asFile.toString()
+
+    def inputDir = file("${buildPath}/jpackage-input")
+    def outputDir = file("${buildPath}/jpackage")
+
+    doFirst {
+        delete inputDir
+        delete outputDir
+        mkdir inputDir
+
+        // Copy shadow JAR to input directory
+        copy {
+            from shadowJar.archiveFile
+            into inputDir
+        }
+    }
+
+    def appName = 'MCP Client GUI'
+    def appVersion = 1
+
+    commandLine = ['jpackage',
+                   '--input', inputDir.absolutePath,
+                   '--dest', outputDir.absolutePath,
+                   '--name', appName,
+                   '--app-version', appVersion,
+                   '--main-jar', shadowJar.archiveFileName.get(),
+                   '--main-class', 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher'
+    ]
+
+    if (currentOS.isWindows()) {
+        commandLine += ['--type', 'msi', '--win-dir-chooser', '--win-menu', '--win-shortcut']
+    } else if (currentOS.isMacOsX()) {
+        commandLine += ['--type', 'dmg', '--mac-package-name', appName]
+    } else if (currentOS.isLinux()) {
+        commandLine += ['--type', 'deb']
+    }
+
+    doLast {
+        println "Native installer created in: ${outputDir.absolutePath}"
+    }
+}
+
