@@ -1,6 +1,7 @@
 package com.brunorozendo.mcpclientgui.service;
 
 import com.brunorozendo.mcpclientgui.model.McpConfig;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -15,12 +16,10 @@ import java.util.Objects;
 
 /**
  * Service for loading MCP (Model Context Protocol) configuration from JSON files.
- * 
  * This loader handles:
  * - Reading and parsing MCP configuration files
  * - Validation of configuration structure
  * - Error handling for malformed or missing files
- * 
  * The expected configuration format follows the MCP specification,
  * typically containing server definitions with their commands and arguments.
  */
@@ -57,7 +56,7 @@ public class McpConfigLoader {
                 // Allow comments in JSON files for better documentation
                 .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true)
                 // Allow trailing commas for easier editing
-                .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_TRAILING_COMMA, true)
+                .configure(JsonReadFeature.ALLOW_TRAILING_COMMA, true)
                 .build();
     }
 
@@ -110,7 +109,6 @@ public class McpConfigLoader {
     
     /**
      * Attempts to load configuration from default locations.
-     * 
      * Searches in order:
      * 1. Current directory
      * 2. User home directory
