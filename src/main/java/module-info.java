@@ -1,6 +1,7 @@
 module com.brunorozendo.mcpclientgui {
     requires javafx.controls;
     requires javafx.fxml;
+    requires javafx.web;
     requires org.controlsfx.controls;
     requires java.net.http;
     requires io.modelcontextprotocol.sdk.mcp;

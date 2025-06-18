@@ -26,7 +26,7 @@ application {
 
 javafx {
     version = '21'
-    modules = ['javafx.controls', 'javafx.fxml']
+    modules = ['javafx.controls', 'javafx.fxml', 'javafx.web']
 }
 
 // Define the JavaFX platform
@@ -76,6 +76,7 @@ dependencies {
     implementation "org.openjfx:javafx-controls:21:$platform"
     implementation "org.openjfx:javafx-fxml:21:$platform"
     implementation "org.openjfx:javafx-graphics:21:$platform"
+    implementation "org.openjfx:javafx-web:21:$platform"
 }
 
 test {
