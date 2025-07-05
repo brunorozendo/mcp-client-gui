@@ -309,7 +309,7 @@ public class MainController implements Initializable {
      * Handles key press events in the message input.
      */
     private void handleKeyPress(KeyEvent event) {
-        if (event.getCode() == KeyCode.ENTER && !event.isShiftDown()) {
+        if (event.getCode() == KeyCode.ENTER && event.isControlDown()) {
             event.consume();
             handleSendMessage();
         }
