@@ -15,18 +15,19 @@ repositories {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(24)
     }
 }
 
 application {
     mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
     mainModule = 'com.brunorozendo.mcpclientgui'
+    applicationDefaultJvmArgs = ['--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
 }
 
 javafx {
-    version = '21'
-    modules = ['javafx.controls', 'javafx.fxml', 'javafx.web']
+    version = '24'
+    modules = ['javafx.controls', 'javafx.fxml', 'javafx.web' , 'javafx.graphics']
 }
 
 // Define the JavaFX platform
@@ -72,15 +73,19 @@ dependencies {
     testImplementation 'org.testfx:testfx-junit5:4.0.18'
     
     // Add platform-specific JavaFX dependencies for the fat JAR
-    implementation "org.openjfx:javafx-base:21:$platform"
-    implementation "org.openjfx:javafx-controls:21:$platform"
-    implementation "org.openjfx:javafx-fxml:21:$platform"
-    implementation "org.openjfx:javafx-graphics:21:$platform"
-    implementation "org.openjfx:javafx-web:21:$platform"
+    implementation "org.openjfx:javafx-base:24:$platform"
+    implementation "org.openjfx:javafx-controls:24:$platform"
+    implementation "org.openjfx:javafx-fxml:24:$platform"
+    implementation "org.openjfx:javafx-graphics:24:$platform"
+    implementation "org.openjfx:javafx-web:24:$platform"
 }
 
 test {
     useJUnitPlatform()
+}
+
+run {
+    jvmArgs = ['--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
 }
 
 // Configure Shadow JAR
@@ -91,6 +96,9 @@ shadowJar {
     
     manifest {
         attributes(
+            'Add-Opens': 'java.base/java.lang=ALL-UNNAMED',
+            'Add-Exports': 'java.base/sun.nio.ch=ALL-UNNAMED',
+            'JVM-Args': '--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc --sun-misc-unsafe-memory-access=allow',
             'Main-Class': 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher',
             'Multi-Release': 'true'
         )
@@ -119,8 +127,9 @@ tasks.register('dist') {
 
 // Configure jlink for creating a custom runtime image
 jlink {
-    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages', '--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc']
     launcher {
+        jvmArgs = ['--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
         name = 'mcp-client-gui'
         mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
     }
@@ -190,7 +199,10 @@ tasks.register('jpackageFromShadow', Exec) {
                    '--name', appName,
                    '--app-version', appVersion,
                    '--main-jar', shadowJar.archiveFileName.get(),
-                   '--main-class', 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher'
+                   '--main-class', 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher',
+                   '--java-options',
+                   '--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc',
+                   '--sun-misc-unsafe-memory-access=allow'
     ]
 
     if (currentOS.isWindows()) {
