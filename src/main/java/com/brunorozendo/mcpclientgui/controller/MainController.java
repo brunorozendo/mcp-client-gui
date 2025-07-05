@@ -351,11 +351,12 @@ public class MainController implements Initializable {
      * Updates the title based on the current chat.
      */
     private void updateTitle(Chat chat) {
-        String title = APP_TITLE;
         if (chat != null) {
-            title += " - " + chat.getName();
+            titleLabel.setText(chat.getName());
+        }else{
+            titleLabel.setText(APP_TITLE);
         }
-        titleLabel.setText(title);
+
     }
     
     /**
