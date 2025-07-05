@@ -31,6 +31,7 @@ public class OllamaApiClient {
     
     // API Configuration
     private static final String CHAT_ENDPOINT = "/api/chat";
+    private static final String TAGS_ENDPOINT = "/api/tags";
     private static final String CONTENT_TYPE_HEADER = "Content-Type";
     private static final String APPLICATION_JSON = "application/json";
     
@@ -275,7 +276,81 @@ public class OllamaApiClient {
     public String getBaseUrl() {
         return baseUrl;
     }
-    
+
+    /**
+     * Fetches the list of available models from the Ollama server.
+     * 
+     * @return The tags response containing available models
+     * @throws IOException if an I/O error occurs
+     * @throws InterruptedException if the request is interrupted
+     * @throws RuntimeException if the API returns an error status
+     */
+    public OllamaApi.TagsResponse getAvailableModels() throws IOException, InterruptedException {
+        // Build HTTP request for tags endpoint
+        HttpRequest httpRequest = buildTagsRequest();
+
+        // Send request and get response
+        HttpResponse<String> httpResponse = sendRequest(httpRequest);
+
+        // Process response
+        return processTagsResponse(httpResponse);
+    }
+
+    /**
+     * Builds an HTTP request for the tags endpoint.
+     * 
+     * @return Configured HttpRequest
+     */
+    private HttpRequest buildTagsRequest() {
+        URI endpoint = URI.create(baseUrl + TAGS_ENDPOINT);
+
+        return HttpRequest.newBuilder()
+                .uri(endpoint)
+                .GET()
+                .timeout(Duration.ofSeconds(10)) // Shorter timeout for tags request
+                .build();
+    }
+
+    /**
+     * Processes the HTTP response and returns the deserialized tags response.
+     * 
+     * @param httpResponse The HTTP response to process
+     * @return The deserialized tags response
+     * @throws IOException if deserialization fails
+     * @throws RuntimeException if the response indicates an error
+     */
+    private OllamaApi.TagsResponse processTagsResponse(HttpResponse<String> httpResponse) throws IOException {
+        int statusCode = httpResponse.statusCode();
+        String responseBody = httpResponse.body();
+
+        logResponse(statusCode, responseBody);
+
+        if (isSuccessful(statusCode)) {
+            return deserializeTagsResponse(responseBody);
+        } else {
+            throw createApiException(statusCode, responseBody);
+        }
+    }
+
+    /**
+     * Deserializes a JSON response to a TagsResponse object.
+     * 
+     * @param responseBody The JSON response body
+     * @return The deserialized TagsResponse
+     * @throws IOException if deserialization fails
+     */
+    private OllamaApi.TagsResponse deserializeTagsResponse(String responseBody) throws IOException {
+        try {
+            OllamaApi.TagsResponse response = objectMapper.readValue(responseBody, OllamaApi.TagsResponse.class);
+            int modelCount = response.models() != null ? response.models().size() : 0;
+            logger.debug("Successfully received {} available models from Ollama", modelCount);
+            return response;
+        } catch (IOException e) {
+            logger.error("Failed to deserialize tags response", e);
+            throw new IOException("Failed to parse Ollama tags API response", e);
+        }
+    }
+
     /**
      * Tests the connection to the Ollama server.
      * 

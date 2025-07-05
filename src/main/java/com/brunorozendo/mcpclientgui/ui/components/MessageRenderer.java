@@ -13,6 +13,8 @@ import javafx.scene.web.WebView;
 import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.html.HtmlRenderer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -23,7 +25,8 @@ import java.util.List;
  * This class is responsible for converting message content to visual components.
  */
 public class MessageRenderer {
-    
+    private static final Logger logger = LoggerFactory.getLogger(MessageRenderer.class);
+
     // Layout constants
     private static final int BUBBLE_PADDING = 10;
     private static final int BUBBLE_MAX_WIDTH = 600;
@@ -350,7 +353,7 @@ public class MessageRenderer {
             String html = renderMessageToHtml(message);
             
             // Debug: Log the HTML content
-            System.out.println("Rendering HTML: " + html.substring(0, Math.min(html.length(), 200)) + "...");
+            logger.info("Rendering HTML: " + html.substring(0, Math.min(html.length(), 200)) + "...");
             
             webEngine.loadContent(html, "text/html");
             

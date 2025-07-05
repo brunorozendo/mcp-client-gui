@@ -1,35 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+<!-- Define property for log directory with fallback -->
+<!-- You can use either LOG_DIR or LOG_PATH environment variable -->
+<property name="LOG_DIR" value="${LOG_DIR:-${LOG_PATH:-${java.io.tmpdir}logs}}" />
 
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
+<!-- Define property for log level with fallback to ERROR -->
+<property name="LOG_LEVEL" value="${LOG_LEVEL:-ERROR}" />
 
-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>logs/mcp-client-gui.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/mcp-client-gui.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
-            <maxFileSize>10MB</maxFileSize>
-            <maxHistory>30</maxHistory>
-            <totalSizeCap>300MB</totalSizeCap>
-        </rollingPolicy>
-        <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
+<!-- Define property for app log level with fallback -->
+<property name="APP_LOG_LEVEL" value="${APP_LOG_LEVEL:-${LOG_LEVEL:-ERROR}}" />
 
-    <!-- Set logging level for the application -->
-    <logger name="com.brunorozendo.mcpclientgui" level="INFO" />
-    <logger name="io.modelcontextprotocol" level="INFO" />
-    
-    <!-- Reduce noise from JavaFX -->
-    <logger name="javafx" level="WARN" />
-    
-    <root level="INFO">
-        <appender-ref ref="STDOUT" />
-        <appender-ref ref="FILE" />
-    </root>
+<!-- File appender for detailed logging -->
+<appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}${file.separator}com.brunorozendo.mcp-client-gui.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+        <fileNamePattern>${LOG_DIR}${file.separator}com.brunorozendo.mcp-client-gui.%d{yyyy-MM-dd}.log</fileNamePattern>
+        <maxHistory>30</maxHistory>
+    </rollingPolicy>
+    <encoder>
+        <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+</appender>
 
+
+<!-- Logger for our application -->
+<logger name="com.brunorozendo" level="${APP_LOG_LEVEL}" />
+
+<!-- Logger for MCP SDK -->
+<logger name="io.modelcontextprotocol" level="${LOG_LEVEL}" />
+
+<logger name="ch.qos.logback" level="${LOG_LEVEL}" />
+
+
+<logger name="javafx" level="${LOG_LEVEL}" />
+
+<!-- Root logger -->
+<root level="${LOG_LEVEL}">
+    <appender-ref ref="FILE" />
+    <!-- Uncomment the line below if you want console output -->
+</root>
 </configuration>

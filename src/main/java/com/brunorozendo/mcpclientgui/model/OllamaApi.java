@@ -304,7 +304,7 @@ public class OllamaApi {
         public static ChatRequest simple(String model, List<Message> messages) {
             return new ChatRequest(model, messages, false, null);
         }
-        
+
         /**
          * Validates that the request has required fields.
          * 
@@ -371,4 +371,38 @@ public class OllamaApi {
             return null;
         }
     }
+
+    /**
+     * Response from the /api/tags endpoint containing available models.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record TagsResponse(
+            @JsonProperty("models") List<ModelInfo> models
+    ) {}
+
+    /**
+     * Information about a single model from the /api/tags endpoint.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ModelInfo(
+            @JsonProperty("name") String name,
+            @JsonProperty("model") String model,
+            @JsonProperty("modified_at") String modifiedAt,
+            @JsonProperty("size") Long size,
+            @JsonProperty("digest") String digest,
+            @JsonProperty("details") ModelDetails details
+    ) {}
+
+    /**
+     * Detailed information about a model.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ModelDetails(
+            @JsonProperty("parent_model") String parentModel,
+            @JsonProperty("format") String format,
+            @JsonProperty("family") String family,
+            @JsonProperty("families") List<String> families,
+            @JsonProperty("parameter_size") String parameterSize,
+            @JsonProperty("quantization_level") String quantizationLevel
+    ) {}
 }

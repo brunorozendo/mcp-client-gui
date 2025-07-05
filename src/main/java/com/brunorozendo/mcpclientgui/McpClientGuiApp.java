@@ -42,6 +42,7 @@ public class McpClientGuiApp extends Application {
      */
     @Override
     public void start(Stage primaryStage) throws IOException {
+
         Parent rootNode = loadMainView();
         Scene mainScene = createMainScene(rootNode);
         configurePrimaryStage(primaryStage, mainScene);

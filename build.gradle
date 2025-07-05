@@ -22,7 +22,7 @@ java {
 application {
     mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
     mainModule = 'com.brunorozendo.mcpclientgui'
-    applicationDefaultJvmArgs = ['--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
+    applicationDefaultJvmArgs = ['--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
 }
 
 javafx {
@@ -85,7 +85,7 @@ test {
 }
 
 run {
-    jvmArgs = ['--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
+    jvmArgs = ['--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
 }
 
 // Configure Shadow JAR
@@ -98,7 +98,7 @@ shadowJar {
         attributes(
             'Add-Opens': 'java.base/java.lang=ALL-UNNAMED',
             'Add-Exports': 'java.base/sun.nio.ch=ALL-UNNAMED',
-            'JVM-Args': '--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc --sun-misc-unsafe-memory-access=allow',
+            'JVM-Args': '--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc --sun-misc-unsafe-memory-access=allow',
             'Main-Class': 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher',
             'Multi-Release': 'true'
         )
@@ -127,9 +127,9 @@ tasks.register('dist') {
 
 // Configure jlink for creating a custom runtime image
 jlink {
-    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages', '--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc']
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages', '--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc']
     launcher {
-        jvmArgs = ['--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
+        jvmArgs = ['--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
         name = 'mcp-client-gui'
         mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
     }
@@ -201,7 +201,7 @@ tasks.register('jpackageFromShadow', Exec) {
                    '--main-jar', shadowJar.archiveFileName.get(),
                    '--main-class', 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher',
                    '--java-options',
-                   '--enable-native-access=javafx.graphics,org.xerial.sqlitejdbc',
+                   '--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc',
                    '--sun-misc-unsafe-memory-access=allow'
     ]
 

@@ -15,8 +15,11 @@ import javafx.fxml.FXMLLoader;
 import javafx.fxml.Initializable;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -25,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
 
@@ -41,7 +45,7 @@ public class MainController implements Initializable {
     private static final String STATUS_READY = "Ready";
     private static final String STATUS_NOT_CONFIGURED = "Not configured. Please go to Settings to configure MCP and LLM.";
     private static final String MODEL_PROMPT_TEXT = "Select a model";
-    
+
     // FXML UI Components
     @FXML private ListView<Chat> chatListView;
     @FXML private Label titleLabel;
@@ -53,20 +57,23 @@ public class MainController implements Initializable {
     @FXML private Label statusLabel;
     @FXML private ComboBox<String> modelComboBox;
 
+    // Loading animation
+    private ImageView loadingImageView;
+
     // Core components
     private ChatManager chatManager;
     private ConnectionManager connectionManager;
     private DatabaseService databaseService;
     private AppSettings appSettings;
-    
+
     // UI components
     private MessageRenderer messageRenderer;
     private ChatListCellFactory chatListCellFactory;
-    
+
     // Chat controller
     private ChatController currentChatController;
     private String currentChatControllerModel;
-    
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         initializeComponents();
@@ -74,7 +81,7 @@ public class MainController implements Initializable {
         loadApplicationData();
         attemptAutoInitialization();
     }
-    
+
     /**
      * Initializes all core components.
      */
@@ -84,12 +91,12 @@ public class MainController implements Initializable {
         chatManager = new ChatManager();
         messageRenderer = new MessageRenderer();
         chatListCellFactory = new ChatListCellFactory();
-        
+
         // Setup chat list cell factory callbacks
         chatListCellFactory.setOnRename(this::handleChatRename);
         chatListCellFactory.setOnDelete(this::handleChatDelete);
     }
-    
+
     /**
      * Sets up all UI components.
      */
@@ -98,9 +105,10 @@ public class MainController implements Initializable {
         setupMessageListView();
         setupMessageInput();
         setupModelSelection();
+        setupLoadingAnimation();
         updateTitle(null);
     }
-    
+
     /**
      * Sets up the chat list view.
      */
@@ -115,7 +123,7 @@ public class MainController implements Initializable {
             }
         );
     }
-    
+
     /**
      * Sets up the message list view.
      */
@@ -123,7 +131,7 @@ public class MainController implements Initializable {
         messageListView.setCellFactory(listView -> messageRenderer.createMessageCell());
         messageListView.setPlaceholder(new Label("Select a chat to start messaging"));
     }
-    
+
     /**
      * Sets up the message input area.
      */
@@ -132,7 +140,7 @@ public class MainController implements Initializable {
         messageInput.addEventFilter(KeyEvent.KEY_PRESSED, this::handleKeyPress);
         setInputEnabled(false);
     }
-    
+
     /**
      * Sets up the model selection combo box.
      */
@@ -142,20 +150,43 @@ public class MainController implements Initializable {
         modelComboBox.setOnAction(e -> handleModelChange());
         updateAvailableModels();
     }
-    
+
+    /**
+     * Sets up the loading animation.
+     */
+    private void setupLoadingAnimation() {
+        try {
+            // Load the loading GIF
+            Image loadingImage = new Image(getClass().getResourceAsStream("/imgs/loading.gif"));
+            loadingImageView = new ImageView(loadingImage);
+            loadingImageView.setFitHeight(16);
+            loadingImageView.setFitWidth(16);
+            loadingImageView.setVisible(false); // Initially hidden
+
+            // Add the loading image to the status bar
+            if (statusLabel != null && statusLabel.getParent() instanceof HBox) {
+                HBox statusBar = (HBox) statusLabel.getParent();
+                statusBar.getChildren().add(0, loadingImageView);
+                statusBar.setSpacing(8); // Add some spacing between the image and text
+            }
+        } catch (Exception e) {
+            logger.error("Failed to load loading animation", e);
+        }
+    }
+
     /**
      * Loads application data from storage.
      */
     private void loadApplicationData() {
         String defaultModel = appSettings.getDefaultLlmModelName();
         chatManager.loadAllChats(defaultModel);
-        
+
         // Select first chat if available
         if (!chatManager.getChats().isEmpty()) {
             chatListView.getSelectionModel().selectFirst();
         }
     }
-    
+
     /**
      * Attempts to automatically initialize connections if configured.
      */
@@ -166,13 +197,13 @@ public class MainController implements Initializable {
             updateStatus(STATUS_NOT_CONFIGURED);
         }
     }
-    
+
     /**
      * Initializes MCP and AI connections.
      */
     private void initializeConnections() {
         updateStatus("Initializing MCP connections...");
-        
+
         connectionManager = new ConnectionManager(appSettings);
         connectionManager.initialize().thenAccept(status -> {
             Platform.runLater(() -> {
@@ -184,21 +215,22 @@ public class MainController implements Initializable {
             });
         });
     }
-    
+
     /**
      * Handles successful connection initialization.
      */
     private void onConnectionSuccess(ConnectionManager.ConnectionStatus status) {
         setInputEnabled(true);
         updateStatus(status.getMessage());
-        
+// Fetch available models from Ollama
+        fetchAndUpdateAvailableModels();
         // Update chat controller if a chat is selected
         Chat currentChat = chatManager.getCurrentChat();
         if (currentChat != null && currentChat.getLlmModelName() != null) {
             createChatController(currentChat.getLlmModelName());
         }
     }
-    
+
     /**
      * Handles connection initialization errors.
      */
@@ -207,9 +239,9 @@ public class MainController implements Initializable {
         DialogHelper.showError("Initialization Error", 
             "Failed to initialize MCP and AI: " + errorMessage);
     }
-    
+
     // ===== Action Handlers =====
-    
+
     @FXML
     private void handleNewChat() {
         String defaultModel = appSettings.getDefaultLlmModelName();
@@ -217,29 +249,29 @@ public class MainController implements Initializable {
             DialogHelper.showNotConfiguredWarning();
             return;
         }
-        
+
         Chat newChat = chatManager.createNewChat(defaultModel);
         selectChat(newChat);
     }
-    
+
     @FXML
     private void handleSendMessage() {
         String text = messageInput.getText().trim();
         if (text.isEmpty() || chatManager.getCurrentChat() == null) {
             return;
         }
-        
+
         Chat currentChat = chatManager.getCurrentChat();
         Message userMessage = chatManager.createMessage(currentChat, text, true);
-        
+
         messageInput.clear();
         scrollToBottom();
-        
+
         if (connectionManager != null && connectionManager.isInitialized()) {
             processWithAI(text);
         }
     }
-    
+
     @FXML
     private void handleSettings() {
         try {
@@ -249,7 +281,7 @@ public class MainController implements Initializable {
             DialogHelper.showError("Failed to load settings dialog: " + e.getMessage());
         }
     }
-    
+
     /**
      * Handles chat rename requests.
      */
@@ -262,7 +294,7 @@ public class MainController implements Initializable {
             }
         });
     }
-    
+
     /**
      * Handles chat delete requests.
      */
@@ -270,7 +302,7 @@ public class MainController implements Initializable {
         if (DialogHelper.showDeleteConfirmation(chat)) {
             boolean wasCurrentChat = chat == chatManager.getCurrentChat();
             chatManager.deleteChat(chat);
-            
+
             if (wasCurrentChat) {
                 clearCurrentChatView();
                 // Select another chat if available
@@ -280,7 +312,7 @@ public class MainController implements Initializable {
             }
         }
     }
-    
+
     /**
      * Handles model selection changes.
      */
@@ -289,22 +321,22 @@ public class MainController implements Initializable {
         if (currentChat == null || modelComboBox.getValue() == null) {
             return;
         }
-        
+
         String newModel = modelComboBox.getValue();
         String oldModel = currentChat.getLlmModelName();
-        
+
         if (!newModel.equals(oldModel)) {
             chatManager.updateChatModel(currentChat, newModel);
             updateTitle(currentChat);
             chatListView.refresh();
-            
+
             if (connectionManager != null && connectionManager.isInitialized()) {
                 createChatController(newModel);
                 updateStatus("Switched to model: " + newModel);
             }
         }
     }
-    
+
     /**
      * Handles key press events in the message input.
      */
@@ -314,9 +346,9 @@ public class MainController implements Initializable {
             handleSendMessage();
         }
     }
-    
+
     // ===== UI Helper Methods =====
-    
+
     /**
      * Selects and loads a chat.
      */
@@ -324,18 +356,18 @@ public class MainController implements Initializable {
         chatManager.setCurrentChat(chat);
         updateTitle(chat);
         messageListView.setItems(chat.getMessages());
-        
+
         modelComboBox.setDisable(false);
         modelComboBox.setValue(chat.getLlmModelName());
-        
+
         scrollToBottom();
-        
+
         // Update chat controller if initialized
         if (connectionManager != null && connectionManager.isInitialized()) {
             createChatController(chat.getLlmModelName());
         }
     }
-    
+
     /**
      * Clears the current chat view.
      */
@@ -346,7 +378,7 @@ public class MainController implements Initializable {
         modelComboBox.setValue(null);
         modelComboBox.setDisable(true);
     }
-    
+
     /**
      * Updates the title based on the current chat.
      */
@@ -358,33 +390,39 @@ public class MainController implements Initializable {
         }
 
     }
-    
+
     /**
      * Updates the status label.
      */
     private void updateStatus(String status) {
         if (statusLabel != null) {
             statusLabel.setText(status);
+
+            // Show/hide loading animation based on status
+            if (loadingImageView != null) {
+                boolean isThinking = status != null && status.contains("Thinking...");
+                loadingImageView.setVisible(isThinking);
+            }
         }
     }
-    
+
     /**
      * Updates the available models in the combo box.
      */
     private void updateAvailableModels() {
         String currentSelection = modelComboBox.getValue();
-        
+
         modelComboBox.getItems().clear();
         for (AppSettings.LlmModel model : appSettings.getLlmModels()) {
             modelComboBox.getItems().add(model.getName());
         }
-        
+
         // Restore selection if still available
         if (currentSelection != null && modelComboBox.getItems().contains(currentSelection)) {
             modelComboBox.setValue(currentSelection);
         }
     }
-    
+
     /**
      * Enables or disables message input controls.
      */
@@ -392,7 +430,7 @@ public class MainController implements Initializable {
         messageInput.setDisable(!enabled);
         sendButton.setDisable(!enabled);
     }
-    
+
     /**
      * Scrolls the message list to the bottom.
      */
@@ -404,18 +442,80 @@ public class MainController implements Initializable {
             }
         });
     }
-    
+
+    /**
+     * Fetches available models from Ollama and updates the application settings.
+     */
+    private void fetchAndUpdateAvailableModels() {
+        if (connectionManager == null || !connectionManager.isInitialized()) {
+            logger.warn("Cannot fetch models: connection manager not initialized");
+            return;
+        }
+
+        // Run in background thread to avoid blocking UI
+        Platform.runLater(() -> updateStatus("Fetching available models..."));
+
+        new Thread(() -> {
+            try {
+                OllamaApi.TagsResponse tagsResponse = connectionManager.getOllamaApiClient().getAvailableModels();
+
+                if (tagsResponse.models() != null && !tagsResponse.models().isEmpty()) {
+                    // Convert Ollama models to LlmModel objects
+                    List<AppSettings.LlmModel> llmModels = new ArrayList<>();
+                    String currentDefaultModel = appSettings.getDefaultLlmModelName();
+                    boolean foundCurrentDefault = false;
+
+                    for (OllamaApi.ModelInfo modelInfo : tagsResponse.models()) {
+                        String modelName = modelInfo.name();
+                        boolean isDefault = modelName.equals(currentDefaultModel);
+                        if (isDefault) {
+                            foundCurrentDefault = true;
+                        }
+                        llmModels.add(new AppSettings.LlmModel(modelName, isDefault));
+                    }
+
+                    // If no current default was found and we have models, make the first one default
+                    if (!foundCurrentDefault && !llmModels.isEmpty()) {
+                        llmModels.get(0).setDefault(true);
+                        appSettings.setDefaultLlmModelName(llmModels.get(0).getName());
+                    }
+
+                    // Update settings with new models
+                    appSettings.setLlmModels(llmModels);
+                    databaseService.saveSettings(appSettings);
+
+                    // Update UI on JavaFX thread
+                    Platform.runLater(() -> {
+                        updateAvailableModels();
+                        updateStatus("Loaded " + llmModels.size() + " available models");
+                        logger.info("Successfully loaded {} models from Ollama", llmModels.size());
+                    });
+                } else {
+                    Platform.runLater(() -> {
+                        updateStatus("No models found on Ollama server");
+                        logger.warn("No models found on Ollama server");
+                    });
+                }
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    updateStatus("Failed to fetch models from Ollama");
+                    logger.error("Failed to fetch available models from Ollama", e);
+                });
+            }
+        }).start();
+    }
+
     // ===== AI Processing =====
-    
+
     /**
      * Processes a user message with the AI.
      */
     private void processWithAI(String userMessage) {
         ensureValidChatController();
-        
+
         if (currentChatController != null) {
             setInputEnabled(false);
-            
+
             currentChatController.processUserMessage(userMessage).whenComplete((result, error) -> {
                 Platform.runLater(() -> {
                     setInputEnabled(true);
@@ -424,7 +524,7 @@ public class MainController implements Initializable {
             });
         }
     }
-    
+
     /**
      * Ensures the chat controller is valid for the current chat.
      */
@@ -433,13 +533,13 @@ public class MainController implements Initializable {
         if (currentChat == null || currentChat.getLlmModelName() == null) {
             return;
         }
-        
+
         String modelName = currentChat.getLlmModelName();
         if (currentChatController == null || !modelName.equals(currentChatControllerModel)) {
             createChatController(modelName);
         }
     }
-    
+
     /**
      * Creates a new chat controller for the specified model.
      */
@@ -447,7 +547,7 @@ public class MainController implements Initializable {
         if (connectionManager == null || !connectionManager.isInitialized()) {
             return;
         }
-        
+
         try {
             String ollamaModel = extractOllamaModelName(modelName);
             String systemPrompt = SystemPromptBuilder.build(
@@ -455,7 +555,7 @@ public class MainController implements Initializable {
                 connectionManager.getMcpResources(),
                 connectionManager.getMcpPrompts()
             );
-            
+
             currentChatController = new ChatController.Builder()
                 .modelName(ollamaModel)
                 .ollamaClient(connectionManager.getOllamaApiClient())
@@ -466,9 +566,9 @@ public class MainController implements Initializable {
                 .onStatusUpdate(this::onAIThinking)
                 .onProcessingFinished(this::onAIThinkingFinished)
                 .build();
-            
+
             currentChatControllerModel = modelName;
-            
+
             logger.info("Created chat controller for model: {}", modelName);
         } catch (Exception e) {
             logger.error("Error creating chat controller", e);
@@ -477,7 +577,7 @@ public class MainController implements Initializable {
         }
     }
 
-    
+
     /**
      * Handles AI message reception.
      */
@@ -488,21 +588,21 @@ public class MainController implements Initializable {
             scrollToBottom();
         }
     }
-    
+
     /**
      * Updates status when AI is thinking.
      */
     private void onAIThinking(String status) {
         Platform.runLater(() -> updateStatus(status));
     }
-    
+
     /**
      * Updates status when AI finishes thinking.
      */
     private void onAIThinkingFinished() {
         Platform.runLater(() -> updateStatus(STATUS_READY));
     }
-    
+
     /**
      * Extracts the Ollama model name from the full model string.
      */
@@ -513,29 +613,29 @@ public class MainController implements Initializable {
         }
         return fullModelName;
     }
-    
+
     // ===== Settings Dialog =====
-    
+
     /**
      * Opens the settings dialog.
      */
     private void openSettingsDialog() throws IOException {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/settings-view.fxml"));
         VBox settingsRoot = loader.load();
-        
+
         SettingsController settingsController = loader.getController();
         Stage settingsStage = createSettingsStage(settingsRoot);
-        
+
         settingsController.setDialogStage(settingsStage);
         settingsController.setSettings(appSettings);
-        
+
         settingsStage.showAndWait();
-        
+
         if (settingsController.isSaved()) {
             onSettingsSaved();
         }
     }
-    
+
     /**
      * Creates the settings dialog stage.
      */
@@ -548,7 +648,7 @@ public class MainController implements Initializable {
         stage.setResizable(false);
         return stage;
     }
-    
+
     /**
      * Handles actions after settings are saved.
      */
