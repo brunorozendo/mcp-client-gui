@@ -1,10 +1,15 @@
 package com.brunorozendo.mcpclientgui.control;
 
 import com.brunorozendo.mcpclientgui.model.McpConfig;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.transport.ServerParameters;
 import io.modelcontextprotocol.client.transport.StdioClientTransport;
+import io.modelcontextprotocol.json.McpJsonMapper;
+import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
+import io.modelcontextprotocol.json.schema.JsonSchemaValidator;
+import io.modelcontextprotocol.json.schema.jackson2.DefaultJsonSchemaValidator;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +49,11 @@ public class McpConnectionManager {
     // Client information
     private static final String CLIENT_NAME = "mcphost-gui";
     private static final String CLIENT_VERSION = "1.0";
+
+    // MCP SDK 2.x needs a JSON binding; pass the Jackson 2 one explicitly instead of
+    // relying on ServiceLoader discovery, which a merged jlink module may not provide.
+    private static final McpJsonMapper MCP_JSON_MAPPER = new JacksonMcpJsonMapper(new ObjectMapper());
+    private static final JsonSchemaValidator MCP_SCHEMA_VALIDATOR = new DefaultJsonSchemaValidator();
 
     // Connection and capability mappings
     private final Map<String, McpAsyncClient> clients = new ConcurrentHashMap<>();
@@ -129,7 +139,7 @@ public class McpConnectionManager {
             logger.debug("Server environment variables: {}", entry.getEnv().keySet());
         }
         
-        return new StdioClientTransport(paramsBuilder.build());
+        return new StdioClientTransport(paramsBuilder.build(), MCP_JSON_MAPPER);
     }
     
     /**
@@ -142,7 +152,8 @@ public class McpConnectionManager {
         return McpClient.async(transport)
                 .requestTimeout(DEFAULT_REQUEST_TIMEOUT)
                 .initializationTimeout(INITIALIZATION_TIMEOUT)
-                .clientInfo(new McpSchema.Implementation(CLIENT_NAME, CLIENT_VERSION))
+                .clientInfo(McpSchema.Implementation.builder(CLIENT_NAME, CLIENT_VERSION).build())
+                .jsonSchemaValidator(MCP_SCHEMA_VALIDATOR)
                 .build();
     }
     
@@ -454,7 +465,7 @@ public class McpConnectionManager {
      */
     private McpSchema.CallToolResult executeToolCall(McpAsyncClient client, String serverName, 
                                                     String toolName, Map<String, Object> arguments) {
-        McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName, arguments);
+        McpSchema.CallToolRequest request = McpSchema.CallToolRequest.builder(toolName).arguments(arguments).build();
         
         try {
             logger.info("Calling tool '{}' on server '{}' with args: {}", toolName, serverName, arguments);
@@ -480,10 +491,10 @@ public class McpConnectionManager {
      * @return Error result
      */
     private McpSchema.CallToolResult createErrorResult(String errorMessage) {
-        return new McpSchema.CallToolResult(
-            List.of(new McpSchema.TextContent(errorMessage)), 
-            true
-        );
+        return McpSchema.CallToolResult.builder()
+            .content(List.of(McpSchema.TextContent.builder(errorMessage).build()))
+            .isError(true)
+            .build();
     }
 
     // ===== Connection Management =====

@@ -1,9 +1,9 @@
 plugins {
     id 'java'
     id 'application'
-    id 'org.openjfx.javafxplugin' version '0.1.0'
-    id 'com.gradleup.shadow' version '9.6.1'
-    id 'org.beryx.jlink' version '4.2.0'
+    alias(libs.plugins.javafx)
+    alias(libs.plugins.shadow)
+    alias(libs.plugins.jlink)
 }
 
 group = 'com.brunorozendo'
@@ -15,7 +15,7 @@ repositories {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(24)
+        languageVersion = JavaLanguageVersion.of(libs.versions.java.get())
     }
 }
 
@@ -26,7 +26,7 @@ application {
 }
 
 javafx {
-    version = '24'
+    version = libs.versions.javafx.get()
     modules = ['javafx.controls', 'javafx.fxml', 'javafx.web' , 'javafx.graphics']
 }
 
@@ -46,39 +46,46 @@ if (currentOS.isWindows()) {
 
 dependencies {
     // MCP SDK
-    implementation 'io.modelcontextprotocol.sdk:mcp:0.10.0'
+    implementation libs.mcp.core
+    implementation libs.mcp.json.jackson2
+    constraints {
+        // mcp-core 2.2.0 declares reactor-core 3.9.0-RC1, a pre-release; pin the latest stable line.
+        implementation(libs.reactor.core) {
+            because 'mcp-core 2.2.0 requests a release candidate; every reactor API it uses exists in 3.8.8'
+        }
+    }
 
     // JSON Processing
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.0'
-    implementation 'com.fasterxml.jackson.core:jackson-annotations:2.17.0'
-    implementation 'com.fasterxml.jackson.core:jackson-core:2.17.0'
+    implementation libs.jackson.databind
+    implementation libs.jackson.annotations
+    implementation libs.jackson.core
 
     // JavaFX Controls
-    implementation 'org.controlsfx:controlsfx:11.2.0'
+    implementation libs.controlsfx
 
     // Logging - SLF4J API and Logback Classic Implementation
-    implementation 'org.slf4j:slf4j-api:2.0.12'
-    implementation 'ch.qos.logback:logback-classic:1.5.6'
-    implementation 'ch.qos.logback:logback-core:1.5.6'
+    implementation libs.slf4j.api
+    implementation libs.logback.classic
+    implementation libs.logback.core
 
     // SQLite for persistence
-    implementation 'org.xerial:sqlite-jdbc:3.42.0.0'
+    implementation libs.sqlite.jdbc
 
     // Markdown processing
-    implementation 'org.commonmark:commonmark:0.21.0'
+    implementation libs.commonmark
 
     // Testing
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testImplementation 'org.testfx:testfx-core:4.0.18'
-    testImplementation 'org.testfx:testfx-junit5:4.0.18'
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.junit.platform.launcher
+    testImplementation libs.testfx.core
+    testImplementation libs.testfx.junit5
     
     // Add platform-specific JavaFX dependencies for the fat JAR
-    implementation "org.openjfx:javafx-base:24:$platform"
-    implementation "org.openjfx:javafx-controls:24:$platform"
-    implementation "org.openjfx:javafx-fxml:24:$platform"
-    implementation "org.openjfx:javafx-graphics:24:$platform"
-    implementation "org.openjfx:javafx-web:24:$platform"
+    implementation variantOf(libs.javafx.base) { classifier(platform) }
+    implementation variantOf(libs.javafx.controls) { classifier(platform) }
+    implementation variantOf(libs.javafx.fxml) { classifier(platform) }
+    implementation variantOf(libs.javafx.graphics) { classifier(platform) }
+    implementation variantOf(libs.javafx.web) { classifier(platform) }
 }
 
 test {
@@ -135,11 +142,15 @@ tasks.register('dist') {
 jlink {
     options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
     enableCds()
+    // The merged module requires JavaFX modules (see mergedModule below); make their jars
+    // visible when the plugin compiles the merged module-info.
+    addExtraDependencies('javafx')
     launcher {
         // App-level CDS: the JVM writes the archive on first exit and reuses it on later starts.
         // {{BIN_DIR}} is expanded by the jlink plugin for the script and jpackage launchers.
+        // -Xlog:cds=off hides JDK 25's start-up notes about module options differing from dump time.
         jvmArgs = ['--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow',
-                   '-XX:+AutoCreateSharedArchive', '-XX:SharedArchiveFile={{BIN_DIR}}/mcp-client-gui.jsa']
+                   '-XX:+AutoCreateSharedArchive', '-XX:SharedArchiveFile={{BIN_DIR}}/mcp-client-gui.jsa', '-Xlog:cds=off']
         name = 'mcp-client-gui'
         mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
     }
@@ -153,6 +164,19 @@ jlink {
         requires 'java.management'
         requires 'java.security.jgss'
         requires 'java.instrument'
+        // Modules the merged jars (MCP SDK, json-schema-validator, ControlsFX, ...) link against;
+        // without them the merged module cannot read Jackson, SLF4J, java.net.http or JavaFX at runtime.
+        // List taken from `./gradlew suggestMergedModuleInfo`.
+        requires 'java.net.http'
+        requires 'jdk.unsupported'
+        requires 'com.fasterxml.jackson.annotation'
+        requires 'com.fasterxml.jackson.core'
+        requires 'com.fasterxml.jackson.databind'
+        requires 'org.slf4j'
+        requires 'javafx.base'
+        requires 'javafx.graphics'
+        requires 'javafx.controls'
+        requires 'javafx.media'
         
         // Force merge all automatic modules
         forceMerge 'slf4j.api'
@@ -164,10 +188,14 @@ jlink {
         forceMerge 'jackson.core'
         forceMerge 'jackson.databind'
         forceMerge 'sqlite.jdbc'
-        forceMerge 'byte.buddy'
         forceMerge 'reactor.core'
         forceMerge 'reactive.streams'
+        forceMerge 'jspecify'
         forceMerge 'mcp'
+        forceMerge 'json.schema.validator'
+        forceMerge 'jackson.dataformat.yaml'
+        forceMerge 'snakeyaml'
+        forceMerge 'itu'
     }
     
     jpackage {

@@ -173,7 +173,7 @@ public class SystemPromptBuilder {
         // Tool parameters
         if (hasParameters(tool)) {
             toolBuilder.append(INDENT_LEVEL_1).append("Parameters:\n");
-            OllamaApi.JsonSchema ollamaSchema = SchemaConverter.convertMcpSchemaRecursive(tool.inputSchema());
+            OllamaApi.JsonSchema ollamaSchema = SchemaConverter.convertMcpSchemaRecursive(SchemaConverter.toMcpJsonSchema(tool.inputSchema()));
             toolBuilder.append(formatJsonSchema(ollamaSchema, INDENT_LEVEL_2));
         } else {
             toolBuilder.append(INDENT_LEVEL_1).append("Parameters: None\n");
@@ -189,9 +189,10 @@ public class SystemPromptBuilder {
      * @return True if the tool has parameters
      */
     private static boolean hasParameters(McpSchema.Tool tool) {
-        return tool.inputSchema() != null && 
-               tool.inputSchema().properties() != null && 
-               !tool.inputSchema().properties().isEmpty();
+        McpSchema.JsonSchema inputSchema = SchemaConverter.toMcpJsonSchema(tool.inputSchema());
+        return inputSchema != null && 
+               inputSchema.properties() != null && 
+               !inputSchema.properties().isEmpty();
     }
 
     /**
