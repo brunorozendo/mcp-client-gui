@@ -4,7 +4,8 @@ module com.brunorozendo.mcpclientgui {
     requires javafx.web;
     requires org.controlsfx.controls;
     requires java.net.http;
-    requires io.modelcontextprotocol.sdk.mcp;
+    requires io.modelcontextprotocol.sdk.mcp.core;
+    requires io.modelcontextprotocol.sdk.mcp.json.jackson2;
     requires com.fasterxml.jackson.databind;
     requires com.fasterxml.jackson.core;
     requires com.fasterxml.jackson.annotation;

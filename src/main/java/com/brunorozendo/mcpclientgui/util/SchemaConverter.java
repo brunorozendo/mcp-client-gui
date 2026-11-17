@@ -108,7 +108,7 @@ public class SchemaConverter {
             }
             
             // Convert the input schema
-            OllamaApi.JsonSchema parametersSchema = convertMcpInputSchemaToOllamaParamsSchema(mcpTool.inputSchema());
+            OllamaApi.JsonSchema parametersSchema = convertMcpInputSchemaToOllamaParamsSchema(toMcpJsonSchema(mcpTool.inputSchema()));
             
             // Create the Ollama function
             OllamaApi.OllamaFunction ollamaFunction = new OllamaApi.OllamaFunction(
@@ -149,6 +149,23 @@ public class SchemaConverter {
         }
         
         return convertMcpSchemaRecursive(mcpInputSchema);
+    }
+
+    /**
+     * Converts a tool input schema as exposed by MCP SDK 2.x ({@code McpSchema.Tool#inputSchema()}
+     * is a raw {@code Map}) into the {@link McpSchema.JsonSchema} record used by this converter.
+     *
+     * A null or empty map (the SDK substitutes an empty map when a server omits the schema)
+     * yields null, which callers treat as "no parameters".
+     *
+     * @param inputSchema The raw MCP input schema (may be null)
+     * @return The schema as a JsonSchema record, or null if absent
+     */
+    public static McpSchema.JsonSchema toMcpJsonSchema(Map<String, Object> inputSchema) {
+        if (inputSchema == null || inputSchema.isEmpty()) {
+            return null;
+        }
+        return convertToMcpSchema(inputSchema, "inputSchema");
     }
 
     /**
