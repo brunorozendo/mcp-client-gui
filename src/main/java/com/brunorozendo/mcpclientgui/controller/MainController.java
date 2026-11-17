@@ -19,6 +19,7 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
@@ -43,10 +44,13 @@ public class MainController implements Initializable {
     // UI Constants
     private static final String APP_TITLE = "MCP Assistant";
     private static final String STATUS_READY = "Ready";
+    private static final String STATUS_LOADING = "Loading...";
+    private static final String STATUS_LOAD_FAILED = "Failed to load application data.";
     private static final String STATUS_NOT_CONFIGURED = "Not configured. Please go to Settings to configure MCP and LLM.";
     private static final String MODEL_PROMPT_TEXT = "Select a model";
 
     // FXML UI Components
+    @FXML private BorderPane rootPane;
     @FXML private ListView<Chat> chatListView;
     @FXML private Label titleLabel;
     @FXML private ListView<Message> messageListView;
@@ -76,19 +80,56 @@ public class MainController implements Initializable {
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
+        // Phase A: UI setup that needs no data, so the window can show right away
         initializeComponents();
         setupUI();
-        loadApplicationData();
-        attemptAutoInitialization();
+        rootPane.setDisable(true);
+        updateStatus(STATUS_LOADING);
+
+        // Phase B: open the database and load settings off the JavaFX thread
+        Thread loader = new Thread(() -> {
+            try {
+                DatabaseService loadedDatabaseService = DatabaseService.getInstance();
+                AppSettings loadedSettings = loadedDatabaseService.loadSettings();
+                ChatManager loadedChatManager = new ChatManager();
+
+                // Phase C: data-dependent setup on the JavaFX thread
+                Platform.runLater(() -> onDataLoaded(loadedDatabaseService, loadedSettings, loadedChatManager));
+            } catch (Throwable e) {
+                logger.error("Failed to load application data", e);
+                String message = e.getMessage() != null ? e.getMessage() : e.toString();
+                Platform.runLater(() -> {
+                    updateStatus(STATUS_LOAD_FAILED);
+                    DialogHelper.showError("Startup error", message);
+                });
+            }
+        }, "app-data-loader");
+        loader.setDaemon(true);
+        loader.start();
     }
 
     /**
-     * Initializes all core components.
+     * Completes initialization once the database, settings and chat manager are available.
+     * Must run on the JavaFX thread.
+     */
+    private void onDataLoaded(DatabaseService loadedDatabaseService, AppSettings loadedSettings,
+                              ChatManager loadedChatManager) {
+        databaseService = loadedDatabaseService;
+        appSettings = loadedSettings;
+        chatManager = loadedChatManager;
+
+        setupChatListView();
+        updateAvailableModels();
+        loadApplicationData();
+        attemptAutoInitialization();
+
+        rootPane.setDisable(false);
+    }
+
+    /**
+     * Initializes the UI components that need no data.
      */
     private void initializeComponents() {
-        databaseService = DatabaseService.getInstance();
-        appSettings = databaseService.loadSettings();
-        chatManager = new ChatManager();
         messageRenderer = new MessageRenderer();
         chatListCellFactory = new ChatListCellFactory();
 
@@ -98,10 +139,9 @@ public class MainController implements Initializable {
     }
 
     /**
-     * Sets up all UI components.
+     * Sets up the UI components that need no data.
      */
     private void setupUI() {
-        setupChatListView();
         setupMessageListView();
         setupMessageInput();
         setupModelSelection();
@@ -148,7 +188,6 @@ public class MainController implements Initializable {
         modelComboBox.setPromptText(MODEL_PROMPT_TEXT);
         modelComboBox.setDisable(true);
         modelComboBox.setOnAction(e -> handleModelChange());
-        updateAvailableModels();
     }
 
     /**
