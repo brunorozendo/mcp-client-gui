@@ -7,10 +7,6 @@ import java.lang.reflect.Method;
  */
 public class McpClientGuiLauncher {
     public static void main(String[] args) throws Exception {
-        // Set system properties for JavaFX
-        System.setProperty("javafx.version", "21");
-        System.setProperty("javafx.runtime.version", "21");
-        
         // Use reflection to call the actual main class
         Class<?> mainClass = Class.forName("com.brunorozendo.mcpclientgui.McpClientGuiApp");
         Method mainMethod = mainClass.getMethod("main", String[].class);
