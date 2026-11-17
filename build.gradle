@@ -2,8 +2,8 @@ plugins {
     id 'java'
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
-    id 'org.beryx.jlink' version '3.0.1'
+    id 'com.gradleup.shadow' version '9.6.1'
+    id 'org.beryx.jlink' version '4.2.0'
 }
 
 group = 'com.brunorozendo'
@@ -69,6 +69,7 @@ dependencies {
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.testfx:testfx-core:4.0.18'
     testImplementation 'org.testfx:testfx-junit5:4.0.18'
     
@@ -93,7 +94,18 @@ shadowJar {
     archiveBaseName = 'mcp-client-gui'
     archiveClassifier = 'all'
     archiveVersion = version
-    
+
+    // Handle duplicate files
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // Merge service files. Shadow 9 applies the duplicates strategy before the
+    // transformers run, so service descriptors must be allowed through to the
+    // ServiceFileTransformer, otherwise they would not be merged.
+    mergeServiceFiles()
+    filesMatching('META-INF/services/**') {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
+
     manifest {
         attributes(
             'Add-Opens': 'java.base/java.lang=ALL-UNNAMED',
@@ -103,18 +115,12 @@ shadowJar {
             'Multi-Release': 'true'
         )
     }
-    
-    // Merge service files
-    mergeServiceFiles()
-    
+
     // Exclude module-info.class files to avoid conflicts
     exclude 'module-info.class'
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
     exclude 'META-INF/*.RSA'
-    
-    // Handle duplicate files
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 // Create a distribution task that builds the shadow JAR
@@ -127,9 +133,13 @@ tasks.register('dist') {
 
 // Configure jlink for creating a custom runtime image
 jlink {
-    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages', '--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc']
+    options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
+    enableCds()
     launcher {
-        jvmArgs = ['--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow']
+        // App-level CDS: the JVM writes the archive on first exit and reuses it on later starts.
+        // {{BIN_DIR}} is expanded by the jlink plugin for the script and jpackage launchers.
+        jvmArgs = ['--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc', '--sun-misc-unsafe-memory-access=allow',
+                   '-XX:+AutoCreateSharedArchive', '-XX:SharedArchiveFile={{BIN_DIR}}/mcp-client-gui.jsa']
         name = 'mcp-client-gui'
         mainClass = 'com.brunorozendo.mcpclientgui.McpClientGuiApp'
     }
@@ -161,10 +171,12 @@ jlink {
     }
     
     jpackage {
+        // jpackage accepts only dot-separated integers, so drop a suffix such as -SNAPSHOT
+        appVersion = project.version.toString().replaceAll('-.*', '')
         if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
-            installerOptions += ['--win-dir-chooser', '--win-menu', '--win-shortcut']
+            installerOptions.addAll(['--win-dir-chooser', '--win-menu', '--win-shortcut'])
         } else if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
-            installerOptions += ['--mac-package-name', 'MCP Client GUI']
+            installerOptions.addAll(['--mac-package-name', 'MCP Client GUI'])
         }
     }
 }
@@ -202,6 +214,7 @@ tasks.register('jpackageFromShadow', Exec) {
                    '--main-class', 'com.brunorozendo.mcpclientgui.McpClientGuiLauncher',
                    '--java-options',
                    '--enable-native-access=javafx.web,javafx.graphics,org.xerial.sqlitejdbc',
+                   '--java-options',
                    '--sun-misc-unsafe-memory-access=allow'
     ]
 
