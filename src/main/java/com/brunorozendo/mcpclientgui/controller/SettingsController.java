@@ -403,10 +403,9 @@ public class SettingsController {
         }
         anthropicApiKeyField.clear();
         
+        // MCP is optional: an empty field removes the saved config file
         String mcpConfigPath = mcpConfigPathField.getText().trim();
-        if (!mcpConfigPath.isEmpty()) {
-            settings.setMcpConfigFile(new File(mcpConfigPath));
-        }
+        settings.setMcpConfigFile(mcpConfigPath.isEmpty() ? null : new File(mcpConfigPath));
     }
     
     /**
@@ -464,15 +463,28 @@ public class SettingsController {
      * Validates MCP configuration file.
      */
     private void validateMcpConfig(List<String> errors) {
-        String mcpPath = mcpConfigPathField.getText().trim();
-        if (mcpPath.isEmpty()) {
-            errors.add("MCP Config file path is required");
-        } else {
-            File mcpFile = new File(mcpPath);
-            if (!mcpFile.exists()) {
-                errors.add("MCP Config file does not exist");
-            }
+        String error = mcpConfigPathError(mcpConfigPathField.getText());
+        if (error != null) {
+            errors.add(error);
         }
+    }
+    
+    /**
+     * Checks the MCP config path. The path is optional: an empty one is valid, a non-empty one must
+     * point to an existing file.
+     * 
+     * @param mcpPath The path as typed (may be null)
+     * @return The validation error, or null if the path is valid
+     */
+    static String mcpConfigPathError(String mcpPath) {
+        String path = mcpPath == null ? "" : mcpPath.trim();
+        if (path.isEmpty()) {
+            return null;
+        }
+        if (!new File(path).exists()) {
+            return "MCP Config file does not exist";
+        }
+        return null;
     }
     
     /**

@@ -6,6 +6,10 @@ module com.brunorozendo.mcpclientgui {
     requires java.net.http;
     requires io.modelcontextprotocol.sdk.mcp.core;
     requires io.modelcontextprotocol.sdk.mcp.json.jackson2;
+    // Explicit modules used only by the automatic MCP JSON module (its schema validator), which
+    // declares no requires: without these, nothing pulls them into the module graph.
+    requires com.networknt.schema;
+    requires com.ethlo.time;
     requires com.fasterxml.jackson.databind;
     requires com.fasterxml.jackson.core;
     requires com.fasterxml.jackson.annotation;

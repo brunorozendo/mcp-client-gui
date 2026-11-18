@@ -83,23 +83,41 @@ public class ConnectionManager {
             try {
                 logger.info("Initializing connections...");
                 
-                // Load MCP configuration
-                McpConfig mcpConfig = loadMcpConfig();
-                
-                // Initialize MCP connections
-                initializeMcpConnections(mcpConfig);
+                // MCP is optional: without a config file, or when it cannot be loaded or connected,
+                // chatting still works with no tools.
+                String message;
+                if (settings.getMcpConfigFile() == null) {
+                    initializeWithoutMcp();
+                    message = "Ready. No MCP servers configured.";
+                } else {
+                    try {
+                        // Load MCP configuration
+                        McpConfig mcpConfig = loadMcpConfig();
+                        
+                        // Initialize MCP connections
+                        initializeMcpConnections(mcpConfig);
+                        
+                        // Fetch MCP capabilities
+                        fetchCapabilities();
+                        
+                        message = String.format("Connected to %d tools from MCP servers.", mcpTools.size());
+                    } catch (Exception e) {
+                        logger.error("Error initializing MCP connections; continuing without MCP tools", e);
+                        if (mcpConnectionManager != null) {
+                            mcpConnectionManager.closeAllClients();
+                        }
+                        initializeWithoutMcp();
+                        message = "Ready. MCP tools unavailable: " + shortReason(e);
+                    }
+                }
                 
                 // Initialize Ollama client
                 initializeOllamaClient();
                 
-                // Fetch MCP capabilities
-                fetchCapabilities();
-                
                 initialized = true;
+                logger.info("Initialization complete: {}", message);
                 
-                return new ConnectionStatus(true, 
-                    String.format("Connected to %d tools from MCP servers.", mcpTools.size()),
-                    mcpTools.size());
+                return new ConnectionStatus(true, message, mcpTools.size());
                 
             } catch (Exception e) {
                 logger.error("Error initializing connections", e);
@@ -107,6 +125,29 @@ public class ConnectionManager {
                     "Failed to initialize: " + e.getMessage(), 0);
             }
         });
+    }
+    
+    /**
+     * Sets up an MCP connection manager with no clients and empty capability lists.
+     */
+    private void initializeWithoutMcp() {
+        mcpConnectionManager = new McpConnectionManager();
+        mcpTools = List.of();
+        mcpResources = List.of();
+        mcpPrompts = List.of();
+    }
+    
+    /**
+     * Gives a one-line reason for an MCP failure, without a stack trace.
+     */
+    private static String shortReason(Exception e) {
+        String reason = e.getMessage();
+        if (reason == null || reason.isBlank()) {
+            return e.getClass().getSimpleName();
+        }
+        reason = reason.strip();
+        int newline = reason.indexOf('\n');
+        return newline >= 0 ? reason.substring(0, newline).strip() : reason;
     }
     
     /**
@@ -257,8 +298,10 @@ public class ConnectionManager {
      * Initializes the Ollama API client.
      */
     private void initializeOllamaClient() {
-        ollamaApiClient = new OllamaApiClient(settings.getOllamaBaseUrl());
-        logger.info("Ollama API client initialized with base URL: {}", settings.getOllamaBaseUrl());
+        // A blank URL is allowed when no Ollama model is used; Ollama calls then fail and are reported.
+        String baseUrl = settings.getOllamaBaseUrl() != null ? settings.getOllamaBaseUrl().trim() : "";
+        ollamaApiClient = new OllamaApiClient(baseUrl);
+        logger.info("Ollama API client initialized with base URL: {}", baseUrl);
     }
     
     /**

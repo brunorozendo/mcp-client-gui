@@ -179,11 +179,12 @@ public class AppSettings {
 
     /**
      * Validates if the settings are complete and valid for use.
+     * The MCP configuration is optional and not part of this check; see {@link #hasExistingMcpConfigFile()}.
      * 
      * @return True if all required settings are present and valid
      */
     public boolean isValid() {
-        return hasValidModels() && hasValidMcpConfig();
+        return hasValidModels();
     }
     
     /**
@@ -199,11 +200,11 @@ public class AppSettings {
     }
     
     /**
-     * Checks if the MCP configuration is valid.
+     * Checks if an MCP configuration file is set and exists.
      * 
-     * @return True if MCP config file exists
+     * @return True if an MCP config file is set and exists
      */
-    private boolean hasValidMcpConfig() {
+    public boolean hasExistingMcpConfigFile() {
         return mcpConfigFile != null && mcpConfigFile.exists();
     }
     

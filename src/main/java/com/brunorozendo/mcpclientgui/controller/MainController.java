@@ -37,6 +37,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.concurrent.CompletionException;
 
 /**
  * Main controller for the MCP Client GUI application.
@@ -51,7 +52,8 @@ public class MainController implements Initializable {
     private static final String STATUS_READY = "Ready";
     private static final String STATUS_LOADING = "Loading...";
     private static final String STATUS_LOAD_FAILED = "Failed to load application data.";
-    private static final String STATUS_NOT_CONFIGURED = "Not configured. Please go to Settings to configure MCP and LLM.";
+    private static final String STATUS_NOT_CONFIGURED = "No default model configured. Please go to Settings to add one.";
+    private static final String STATUS_NOT_CONNECTED = "Not connected yet. Please wait, or check Settings.";
     private static final String MODEL_PROMPT_TEXT = "Select a model";
 
     // FXML UI Components
@@ -235,9 +237,13 @@ public class MainController implements Initializable {
      * Attempts to automatically initialize connections if configured.
      */
     private void attemptAutoInitialization() {
+        // The input is usable as soon as the data is loaded: until the connection is ready,
+        // sending keeps the text and explains why (see handleSendMessage).
+        setInputEnabled(true);
         if (appSettings.isValid()) {
             initializeConnections();
         } else {
+            // Only a missing default model gets here; MCP is optional
             updateStatus(STATUS_NOT_CONFIGURED);
         }
     }
@@ -249,7 +255,13 @@ public class MainController implements Initializable {
         updateStatus("Initializing MCP connections...");
 
         connectionManager = new ConnectionManager(appSettings);
-        connectionManager.initialize().thenAccept(status -> {
+        connectionManager.initialize().whenComplete((status, error) -> {
+            if (error != null) {
+                Throwable cause = unwrap(error);
+                logger.error("MCP and AI initialization failed", cause);
+                Platform.runLater(() -> onConnectionError(describe(cause)));
+                return;
+            }
             Platform.runLater(() -> {
                 if (status.isSuccess()) {
                     onConnectionSuccess(status);
@@ -279,6 +291,9 @@ public class MainController implements Initializable {
      * Handles connection initialization errors.
      */
     private void onConnectionError(String errorMessage) {
+        // Keep the input usable: sending explains that there is no connection, and saving
+        // Settings retries the initialization.
+        setInputEnabled(true);
         updateStatus("Error: " + errorMessage);
         DialogHelper.showError("Initialization Error", 
             "Failed to initialize MCP and AI: " + errorMessage);
@@ -305,15 +320,19 @@ public class MainController implements Initializable {
             return;
         }
 
+        if (connectionManager == null || !connectionManager.isInitialized()) {
+            // Keep the typed text so it can be sent once the connection is ready
+            updateStatus(appSettings.isValid() ? STATUS_NOT_CONNECTED : STATUS_NOT_CONFIGURED);
+            return;
+        }
+
         Chat currentChat = chatManager.getCurrentChat();
         Message userMessage = chatManager.createMessage(currentChat, text, true);
 
         messageInput.clear();
         scrollToBottom();
 
-        if (connectionManager != null && connectionManager.isInitialized()) {
-            processWithAI(text);
-        }
+        processWithAI(text);
     }
 
     @FXML
@@ -612,16 +631,46 @@ public class MainController implements Initializable {
     private void processWithAI(String userMessage) {
         ensureValidChatController();
 
-        if (currentChatController != null) {
-            setInputEnabled(false);
-
-            currentChatController.processUserMessage(userMessage).whenComplete((result, error) -> {
-                Platform.runLater(() -> {
-                    setInputEnabled(true);
-                    messageInput.requestFocus();
-                });
-            });
+        if (currentChatController == null) {
+            Chat chat = chatManager.getCurrentChat();
+            String model = chat != null ? chat.getLlmModelName() : null;
+            logger.warn("Message not sent: no chat controller for model {}", model);
+            updateStatus("Message not sent: no chat controller for model "
+                + (model != null ? model : "(none)") + ".");
+            return;
         }
+
+        setInputEnabled(false);
+
+        currentChatController.processUserMessage(userMessage).whenComplete((result, error) -> {
+            // The chat controllers report Exceptions in the chat themselves; only a failure that
+            // escaped them (an Error) arrives here.
+            Throwable cause = error != null ? unwrap(error) : null;
+            if (cause != null) {
+                logger.error("Message processing failed", cause);
+            }
+            Platform.runLater(() -> {
+                setInputEnabled(true);
+                messageInput.requestFocus();
+                if (cause != null) {
+                    updateStatus("Error: message processing failed: " + describe(cause));
+                }
+            });
+        });
+    }
+
+    /** Returns the cause of a {@link CompletionException}, or the throwable itself. */
+    private static Throwable unwrap(Throwable error) {
+        return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    /** One-line reason: simple class name plus the first line of the message. */
+    private static String describe(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName();
+        }
+        return error.getClass().getSimpleName() + ": " + message.lines().findFirst().orElse("").strip();
     }
 
     /**
