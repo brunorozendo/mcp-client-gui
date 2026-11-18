@@ -59,6 +59,18 @@ public class MessageProcessor {
     }
     
     /**
+     * Displays plain assistant text as it is (no {@code <think>} tag handling, which is Ollama-specific).
+     *
+     * @param text The assistant text to display; blank text is not shown
+     */
+    public void displayAssistantText(String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        displayMessage(text.trim(), false);
+    }
+
+    /**
      * Processes a user message for display.
      * 
      * @param userMessage The user's message content

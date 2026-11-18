@@ -1,10 +1,15 @@
 package com.brunorozendo.mcpclientgui.controller;
 
+import com.brunorozendo.mcpclientgui.core.chat.AnthropicChatController;
+import com.brunorozendo.mcpclientgui.core.chat.AnthropicConversation;
 import com.brunorozendo.mcpclientgui.core.chat.ChatController;
+import com.brunorozendo.mcpclientgui.core.chat.ChatSession;
+import com.brunorozendo.mcpclientgui.core.chat.ToolExecutor;
 import com.brunorozendo.mcpclientgui.control.SystemPromptBuilder;
 import com.brunorozendo.mcpclientgui.core.ChatManager;
 import com.brunorozendo.mcpclientgui.core.ConnectionManager;
 import com.brunorozendo.mcpclientgui.model.*;
+import com.brunorozendo.mcpclientgui.service.AnthropicService;
 import com.brunorozendo.mcpclientgui.service.DatabaseService;
 import com.brunorozendo.mcpclientgui.ui.components.ChatListCellFactory;
 import com.brunorozendo.mcpclientgui.ui.components.MessageRenderer;
@@ -74,8 +79,8 @@ public class MainController implements Initializable {
     private MessageRenderer messageRenderer;
     private ChatListCellFactory chatListCellFactory;
 
-    // Chat controller
-    private ChatController currentChatController;
+    // Chat controller (Ollama or Anthropic, chosen by the chat's model name)
+    private ChatSession currentChatController;
     private String currentChatControllerModel;
 
     @Override
@@ -483,7 +488,10 @@ public class MainController implements Initializable {
     }
 
     /**
-     * Fetches available models from Ollama and updates the application settings.
+     * Fetches the available models from Ollama (tags) and Anthropic (Models API) and updates the
+     * application settings. Each provider's list replaces only that provider's models, so an
+     * unreachable Ollama server or missing Anthropic credentials leave the other list in place, and
+     * the default Anthropic model always stays available.
      */
     private void fetchAndUpdateAvailableModels() {
         if (connectionManager == null || !connectionManager.isInitialized()) {
@@ -494,54 +502,106 @@ public class MainController implements Initializable {
         // Run in background thread to avoid blocking UI
         Platform.runLater(() -> updateStatus("Fetching available models..."));
 
+        ConnectionManager manager = connectionManager;
         new Thread(() -> {
-            try {
-                OllamaApi.TagsResponse tagsResponse = connectionManager.getOllamaApiClient().getAvailableModels();
+            List<String> ollamaNames = fetchOllamaModelNames(manager);
+            List<String> anthropicNames = fetchAnthropicModelNames(manager);
 
-                if (tagsResponse.models() != null && !tagsResponse.models().isEmpty()) {
-                    // Convert Ollama models to LlmModel objects
-                    List<AppSettings.LlmModel> llmModels = new ArrayList<>();
-                    String currentDefaultModel = appSettings.getDefaultLlmModelName();
-                    boolean foundCurrentDefault = false;
-
-                    for (OllamaApi.ModelInfo modelInfo : tagsResponse.models()) {
-                        String modelName = modelInfo.name();
-                        boolean isDefault = modelName.equals(currentDefaultModel);
-                        if (isDefault) {
-                            foundCurrentDefault = true;
-                        }
-                        llmModels.add(new AppSettings.LlmModel(modelName, isDefault));
-                    }
-
-                    // If no current default was found and we have models, make the first one default
-                    if (!foundCurrentDefault && !llmModels.isEmpty()) {
-                        llmModels.get(0).setDefault(true);
-                        appSettings.setDefaultLlmModelName(llmModels.get(0).getName());
-                    }
-
-                    // Update settings with new models
-                    appSettings.setLlmModels(llmModels);
-                    databaseService.saveSettings(appSettings);
-
-                    // Update UI on JavaFX thread
-                    Platform.runLater(() -> {
-                        updateAvailableModels();
-                        updateStatus("Loaded " + llmModels.size() + " available models");
-                        logger.info("Successfully loaded {} models from Ollama", llmModels.size());
-                    });
-                } else {
-                    Platform.runLater(() -> {
-                        updateStatus("No models found on Ollama server");
-                        logger.warn("No models found on Ollama server");
-                    });
-                }
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    updateStatus("Failed to fetch models from Ollama");
-                    logger.error("Failed to fetch available models from Ollama", e);
-                });
+            // Keep the current entries of a provider whose fetch failed or returned nothing
+            List<String> merged = new ArrayList<>();
+            List<String> currentNames = new ArrayList<>();
+            for (AppSettings.LlmModel model : appSettings.getLlmModels()) {
+                currentNames.add(model.getName());
             }
-        }).start();
+            if (ollamaNames.isEmpty()) {
+                currentNames.stream().filter(n -> LlmProvider.of(n) == LlmProvider.OLLAMA).forEach(merged::add);
+            } else {
+                merged.addAll(ollamaNames);
+            }
+            if (anthropicNames.isEmpty()) {
+                currentNames.stream().filter(n -> LlmProvider.of(n) == LlmProvider.ANTHROPIC).forEach(merged::add);
+            } else {
+                merged.addAll(anthropicNames);
+            }
+            if (!merged.contains(LlmProvider.DEFAULT_ANTHROPIC_MODEL_NAME)) {
+                merged.add(LlmProvider.DEFAULT_ANTHROPIC_MODEL_NAME);
+            }
+
+            // Keep the current default if it is still listed, otherwise make the first one default
+            String currentDefaultModel = appSettings.getDefaultLlmModelName();
+            String defaultModel = merged.contains(currentDefaultModel) ? currentDefaultModel : merged.get(0);
+            List<AppSettings.LlmModel> llmModels = new ArrayList<>();
+            for (String name : merged) {
+                llmModels.add(new AppSettings.LlmModel(name, name.equals(defaultModel)));
+            }
+
+            try {
+                appSettings.setLlmModels(llmModels);
+                appSettings.setDefaultLlmModelName(defaultModel);
+                databaseService.saveSettings(appSettings);
+            } catch (Exception e) {
+                logger.error("Failed to save the fetched model list", e);
+            }
+
+            String status = ollamaNames.isEmpty()
+                ? "Loaded " + llmModels.size() + " models (could not fetch models from Ollama)"
+                : "Loaded " + llmModels.size() + " available models";
+            Platform.runLater(() -> {
+                updateAvailableModels();
+                updateStatus(status);
+                logger.info("Loaded {} models ({} from Ollama, {} from Anthropic)",
+                            llmModels.size(), ollamaNames.size(), anthropicNames.size());
+            });
+        }, "model-list-fetch").start();
+    }
+
+    /**
+     * Fetches the Ollama model tags. Runs on a background thread.
+     *
+     * @return The tag names, or an empty list if Ollama is unreachable or has no models
+     */
+    private List<String> fetchOllamaModelNames(ConnectionManager manager) {
+        List<String> names = new ArrayList<>();
+        try {
+            OllamaApi.TagsResponse tagsResponse = manager.getOllamaApiClient().getAvailableModels();
+            if (tagsResponse.models() != null) {
+                for (OllamaApi.ModelInfo modelInfo : tagsResponse.models()) {
+                    names.add(modelInfo.name());
+                }
+            }
+            if (names.isEmpty()) {
+                logger.warn("No models found on Ollama server");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to fetch available models from Ollama", e);
+        }
+        return names;
+    }
+
+    /**
+     * Fetches the Anthropic models through the SDK's Models API. Runs on a background thread; this is
+     * the first use of the Anthropic client, after start-up has finished.
+     *
+     * @return Prefixed model names, or an empty list if there are no credentials or the call fails
+     */
+    private List<String> fetchAnthropicModelNames(ConnectionManager manager) {
+        AnthropicService service = manager.getAnthropicService();
+        if (!service.mayHaveCredentials()) {
+            logger.info("No Anthropic credential configured; keeping the default Anthropic model list");
+            return List.of();
+        }
+        try {
+            return service.listModelNames();
+        } catch (com.anthropic.errors.AnthropicServiceException e) {
+            // Status only: the SDK exception carries no credential, but its headers are not logged either.
+            logger.warn("Could not list Anthropic models (HTTP {})", e.statusCode());
+        } catch (com.anthropic.errors.AnthropicException e) {
+            logger.warn("Could not list Anthropic models: {}", e.getClass().getSimpleName());
+        } catch (RuntimeException e) {
+            // Best-effort listing: an unexpected client error must not stop the Ollama list from loading.
+            logger.warn("Could not list Anthropic models: {}", e.getClass().getSimpleName());
+        }
+        return List.of();
     }
 
     // ===== AI Processing =====
@@ -588,6 +648,13 @@ public class MainController implements Initializable {
         }
 
         try {
+            if (LlmProvider.of(modelName) == LlmProvider.ANTHROPIC) {
+                currentChatController = createAnthropicChatController(modelName);
+                currentChatControllerModel = modelName;
+                logger.info("Created chat controller for model: {}", modelName);
+                return;
+            }
+
             String ollamaModel = extractOllamaModelName(modelName);
             String systemPrompt = SystemPromptBuilder.build(
                 connectionManager.getMcpTools(),
@@ -616,6 +683,34 @@ public class MainController implements Initializable {
         }
     }
 
+
+    /**
+     * Creates the chat controller for an Anthropic model. No network call: the SDK client is created
+     * on the first request.
+     */
+    private ChatSession createAnthropicChatController(String modelName) {
+        String systemPrompt = SystemPromptBuilder.buildForNativeTools(
+            connectionManager.getMcpResources(),
+            connectionManager.getMcpPrompts()
+        );
+        ToolExecutor toolExecutor = new ToolExecutor(connectionManager.getMcpConnectionManager());
+        AnthropicConversation conversation = new AnthropicConversation(
+            connectionManager.getAnthropicService(),
+            LlmProvider.apiModelName(modelName),
+            systemPrompt,
+            connectionManager.getAnthropicTools(),
+            toolExecutor::execute
+        );
+
+        Chat chat = chatManager.getCurrentChat();
+        return new AnthropicChatController(
+            conversation,
+            () -> chat != null ? chat.getMessages() : List.of(),
+            this::onAIMessageReceived,
+            this::onAIThinking,
+            this::onAIThinkingFinished
+        );
+    }
 
     /**
      * Handles AI message reception.

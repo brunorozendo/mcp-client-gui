@@ -19,7 +19,7 @@ import java.util.function.Consumer;
  * Manages chat conversations between the user and AI assistant.
  * Coordinates message processing, tool execution, and status updates.
  */
-public class ChatController {
+public class ChatController implements ChatSession {
     
     private static final Logger logger = LoggerFactory.getLogger(ChatController.class);
     
@@ -129,6 +129,7 @@ public class ChatController {
      * @param userInput The user's message
      * @return A CompletableFuture that completes when processing is done
      */
+    @Override
     public CompletableFuture<Void> processUserMessage(String userInput) {
         Objects.requireNonNull(userInput, "User input cannot be null");
         
@@ -317,6 +318,7 @@ public class ChatController {
      * 
      * @return The model name
      */
+    @Override
     public String getModelName() {
         return modelName;
     }
@@ -326,6 +328,7 @@ public class ChatController {
      * 
      * @return true if processing is in progress
      */
+    @Override
     public boolean isProcessing() {
         return isProcessing.get();
     }

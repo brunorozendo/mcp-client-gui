@@ -1,9 +1,12 @@
 package com.brunorozendo.mcpclientgui.core;
 
+import com.anthropic.models.beta.messages.BetaTool;
 import com.brunorozendo.mcpclientgui.control.McpConnectionManager;
+import com.brunorozendo.mcpclientgui.core.chat.AnthropicConversation;
 import com.brunorozendo.mcpclientgui.model.AppSettings;
 import com.brunorozendo.mcpclientgui.model.McpConfig;
 import com.brunorozendo.mcpclientgui.model.OllamaApi;
+import com.brunorozendo.mcpclientgui.service.AnthropicService;
 import com.brunorozendo.mcpclientgui.service.McpConfigLoader;
 import com.brunorozendo.mcpclientgui.service.OllamaApiClient;
 import com.brunorozendo.mcpclientgui.util.SchemaConverter;
@@ -15,8 +18,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Manages connections to MCP servers and the AI client.
+ * Manages connections to MCP servers and the AI clients.
  * This class handles initialization and provides access to MCP capabilities.
+ *
+ * Initialization makes no call to either LLM provider: the Ollama client is only constructed, and the
+ * Anthropic service is created on first use (its SDK client later still, on the first request).
  */
 public class ConnectionManager {
     
@@ -25,6 +31,7 @@ public class ConnectionManager {
     private final AppSettings settings;
     private McpConnectionManager mcpConnectionManager;
     private OllamaApiClient ollamaApiClient;
+    private AnthropicService anthropicService;
     
     // Cached MCP capabilities
     private List<McpSchema.Tool> mcpTools;
@@ -130,6 +137,19 @@ public class ConnectionManager {
     }
     
     /**
+     * Gets the Anthropic service, creating it on first call from the settings' API key
+     * (or the SDK's environment lookup when the key is empty). No network call is made here.
+     * 
+     * @return The Anthropic service
+     */
+    public synchronized AnthropicService getAnthropicService() {
+        if (anthropicService == null) {
+            anthropicService = new AnthropicService(settings.getAnthropicApiKey());
+        }
+        return anthropicService;
+    }
+    
+    /**
      * Gets all available MCP tools.
      * 
      * @return List of MCP tools, or null if not initialized
@@ -171,9 +191,30 @@ public class ConnectionManager {
     }
     
     /**
+     * Converts MCP tools to Anthropic tool definitions.
+     * 
+     * @return List of tools in Anthropic format, in a fixed order
+     * @throws IllegalStateException if not initialized
+     */
+    public List<BetaTool> getAnthropicTools() {
+        if (!initialized || mcpTools == null) {
+            throw new IllegalStateException("Connection manager not initialized");
+        }
+        
+        return AnthropicConversation.toAnthropicTools(mcpTools);
+    }
+    
+    /**
      * Closes all connections and releases resources.
      */
     public void close() {
+        synchronized (this) {
+            if (anthropicService != null) {
+                anthropicService.close();
+                anthropicService = null;
+            }
+        }
+        
         if (mcpConnectionManager != null) {
             try {
                 logger.info("Closing MCP connections...");

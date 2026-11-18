@@ -31,6 +31,13 @@ public class SystemPromptBuilder {
         "You can use the tools provided. When you decide to call a tool, you must respond with a JSON object containing the tool call.\n" +
         "You also have access to a list of resources and prompts for context.\n";
     
+    // Header for providers that receive the tools through their API's native tool definitions
+    // (Anthropic): the tool schemas are not repeated in the prompt and no JSON reply format is asked for.
+    private static final String NATIVE_TOOLS_PROMPT_HEADER =
+        "You are a helpful AI assistant with access to a set of capabilities provided by Model Context Protocol (MCP) servers.\n" +
+        "The MCP tools are available to you as tools; call them when they help answer the user.\n" +
+        "You also have access to a list of resources and prompts for context.\n";
+    
     private static final String NO_CAPABILITIES_MESSAGE = 
         "\nNo external capabilities (tools, resources, or prompts) are currently available.";
     
@@ -108,6 +115,31 @@ public class SystemPromptBuilder {
                    tools.size(), resources.size(), prompts.size(), finalPrompt.length());
         
         return finalPrompt;
+    }
+
+    /**
+     * Builds the system prompt for a provider that receives the MCP tools as native tool definitions.
+     *
+     * The tool schemas are left out (the API carries them), and resources and prompts are listed in a
+     * fixed order so the prompt stays byte-identical across turns, which keeps it prompt-cacheable.
+     *
+     * @param resources List of available MCP resources (may be null or empty)
+     * @param prompts List of available MCP prompts (may be null or empty)
+     * @return A formatted system prompt string
+     */
+    public static String buildForNativeTools(List<McpSchema.Resource> resources,
+                                             List<McpSchema.Prompt> prompts) {
+        List<McpSchema.Resource> sortedResources = resources == null ? List.of() : resources.stream()
+                .sorted(java.util.Comparator.comparing(r -> String.valueOf(r.uri())))
+                .collect(Collectors.toList());
+        List<McpSchema.Prompt> sortedPrompts = prompts == null ? List.of() : prompts.stream()
+                .sorted(java.util.Comparator.comparing(p -> String.valueOf(p.name())))
+                .collect(Collectors.toList());
+        
+        StringBuilder promptBuilder = new StringBuilder(NATIVE_TOOLS_PROMPT_HEADER);
+        appendResourcesSection(promptBuilder, sortedResources);
+        appendPromptsSection(promptBuilder, sortedPrompts);
+        return promptBuilder.toString();
     }
 
     /**

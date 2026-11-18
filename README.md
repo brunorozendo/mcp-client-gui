@@ -6,6 +6,7 @@ A JavaFX-based graphical user interface for interacting with Large Language Mode
 
 - **Modern JavaFX Interface**: Clean, intuitive chat interface with multiple chat sessions
 - **MCP Integration**: Connect to Model Context Protocol servers for enhanced AI capabilities
+- **Anthropic (Claude) Support**: Claude models through the official Anthropic Java SDK (default: `claude-opus-5-5`)
 - **Ollama Support**: Built-in support for Ollama language models
 - **Settings Management**: Easy configuration of LLM models and MCP configurations
 - **Real-time Chat**: Asynchronous message processing with thinking indicators
@@ -14,7 +15,8 @@ A JavaFX-based graphical user interface for interacting with Large Language Mode
 ## Prerequisites
 
 - Java 21 or later
-- [Ollama](https://ollama.ai/) installed and running locally
+- An Anthropic API key for Claude models (see [Anthropic API Key](#anthropic-api-key)), and/or
+- [Ollama](https://ollama.ai/) installed and running locally, for Ollama models
 - MCP server(s) configured and available
 - An `mcp.json` configuration file
 
@@ -52,9 +54,23 @@ Create an `mcp.json` file to define your MCP servers. Example:
 
 When you first run the application, click the "Settings" button to configure:
 
-1. **LLM Model**: The Ollama model name (e.g., `qwen3:14b`)
+1. **LLM Model**: `anthropic:<model id>` for Claude (default: `anthropic:claude-opus-5-5`) or an Ollama model name (e.g., `qwen3:14b`). Each chat keeps the model it was created with; switch it with the model selector.
 2. **MCP Config File**: Path to your `mcp.json` file
-3. **Ollama Base URL**: URL of your Ollama instance (default: `http://localhost:11434`)
+3. **Ollama Base URL**: URL of your Ollama instance (default: `http://localhost:11434`; only needed for Ollama models)
+4. **Anthropic API key**: see below
+
+### Anthropic API Key
+
+Claude models need an Anthropic API key. Either:
+
+- enter it in **Settings > Anthropic API key**. It is stored in the application's local database
+  (`~/.mcp-client-gui/mcp_client_gui.db`) and is never shown again; type a new key to replace it or
+  click **Remove key** to delete it; or
+- leave that field empty and set the `ANTHROPIC_API_KEY` environment variable before starting the
+  application (the SDK also accepts `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile).
+
+The key in Settings takes precedence over the environment. Without any key the application still
+starts; sending a message to a Claude model then shows a message pointing you to Settings.
 
 ## Building and Running
 
@@ -117,6 +133,7 @@ src/main/java/com/brunorozendo/mcpclientgui/
 
 - **JavaFX**: UI framework
 - **MCP SDK**: Model Context Protocol integration
+- **Anthropic Java SDK**: Claude models
 - **Jackson**: JSON processing
 - **SLF4J + Logback**: Logging
 - **ControlsFX**: Enhanced UI controls

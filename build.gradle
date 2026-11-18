@@ -55,7 +55,15 @@ dependencies {
         }
     }
 
+    // Anthropic API (Claude)
+    implementation libs.anthropic.java
+    // One Kotlin version for the SDK's Kotlin runtime (stdlib, stdlib-jdk7/jdk8, reflect).
+    implementation dependencies.platform(libs.kotlin.bom)
+
     // JSON Processing
+    // The BOM keeps every Jackson module on one version (the Anthropic SDK asks for older ones).
+    // Called through `dependencies.` because this script's `platform` variable names the JavaFX OS.
+    implementation dependencies.platform(libs.jackson.bom)
     implementation libs.jackson.databind
     implementation libs.jackson.annotations
     implementation libs.jackson.core
@@ -112,6 +120,11 @@ shadowJar {
     filesMatching('META-INF/services/**') {
         duplicatesStrategy = DuplicatesStrategy.INCLUDE
     }
+    // Same for Kotlin module metadata (Anthropic SDK, OkHttp, Okio, Kotlin stdlib), which Shadow's
+    // KotlinModuleMetadataTransformer merges.
+    filesMatching('META-INF/*.kotlin_module') {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
 
     manifest {
         attributes(
@@ -142,9 +155,9 @@ tasks.register('dist') {
 jlink {
     options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
     enableCds()
-    // The merged module requires JavaFX modules (see mergedModule below); make their jars
-    // visible when the plugin compiles the merged module-info.
-    addExtraDependencies('javafx')
+    // The merged module requires JavaFX modules and Error Prone's annotations (see mergedModule below);
+    // make their jars visible when the plugin compiles the merged module-info.
+    addExtraDependencies('javafx', 'error_prone_annotations')
     launcher {
         // App-level CDS: the JVM writes the archive on first exit and reuses it on later starts.
         // {{BIN_DIR}} is expanded by the jlink plugin for the script and jpackage launchers.
@@ -177,7 +190,13 @@ jlink {
         requires 'javafx.graphics'
         requires 'javafx.controls'
         requires 'javafx.media'
-        
+        // The Anthropic SDK's modules are real modules and stay outside the merged module, but its
+        // non-modular dependencies are merged into it: OkHttp, Okio, OpenTelemetry, Swagger annotations,
+        // and (through org.jetbrains:annotations) the Kotlin stdlib. They link against Error Prone's
+        // annotations module (suggestMergedModuleInfo). The plugin generates delegating modules
+        // (okhttp3, kotlin.stdlib, io.opentelemetry.api, ...) so the SDK's `requires` still resolve.
+        requires 'com.google.errorprone.annotations'
+
         // Force merge all automatic modules
         forceMerge 'slf4j.api'
         forceMerge 'logback.classic'

@@ -12,6 +12,9 @@ slf4j = "2.0.20"
 logback = "1.6.7"
 sqlite-jdbc = "3.54.1.0"
 commonmark = "0.32.0"
+anthropic = "3.10.0"
+# jackson-module-kotlin 2.23.0 (pulled in by the Anthropic SDK) is built against Kotlin 2.1.21.
+kotlin = "2.1.21"
 junit = "6.1.3"
 testfx = "4.0.18"
 openjfx-plugin = "0.1.0"
@@ -22,6 +25,8 @@ jlink = "4.2.0"
 mcp-core = { module = "io.modelcontextprotocol.sdk:mcp-core", version.ref = "mcp-sdk" }
 mcp-json-jackson2 = { module = "io.modelcontextprotocol.sdk:mcp-json-jackson2", version.ref = "mcp-sdk" }
 reactor-core = { module = "io.projectreactor:reactor-core", version.ref = "reactor" }
+# Aligns the Jackson modules the Anthropic SDK brings (jdk8, jsr310, kotlin) with jackson-databind.
+jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson-annotations" }
@@ -30,6 +35,8 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 logback-core = { module = "ch.qos.logback:logback-core", version.ref = "logback" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+kotlin-bom = { module = "org.jetbrains.kotlin:kotlin-bom", version.ref = "kotlin" }
+anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthropic" }
 commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 # No version: aligned to junit-jupiter through the JUnit BOM it brings in.

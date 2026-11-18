@@ -14,17 +14,20 @@ import java.util.Optional;
  * - The default LLM model to use for new chats
  * - MCP (Model Context Protocol) configuration file location
  * - Ollama API endpoint URL
+ * - Anthropic API key (optional; the SDK's environment lookup is used when it is empty)
  */
 public class AppSettings {
     
     // Default values
-    private static final String DEFAULT_MODEL_NAME = "qwen3:14b";
+    private static final String DEFAULT_MODEL_NAME = LlmProvider.DEFAULT_ANTHROPIC_MODEL_NAME;
     private static final String DEFAULT_OLLAMA_URL = "http://localhost:11434";
     
     private List<LlmModel> llmModels;
     private String defaultLlmModelName;
     private File mcpConfigFile;
     private String ollamaBaseUrl;
+    // Never logged or included in toString(); see getAnthropicApiKey().
+    private String anthropicApiKey;
     
     /**
      * Creates new application settings with default values.
@@ -146,6 +149,34 @@ public class AppSettings {
         this.ollamaBaseUrl = ollamaBaseUrl;
     }
     
+    /**
+     * Gets the Anthropic API key entered in Settings.
+     * The value is a secret: callers must not log it or show it in the UI.
+     *
+     * @return The key, or null when none is stored (the SDK then reads its environment)
+     */
+    public String getAnthropicApiKey() {
+        return anthropicApiKey;
+    }
+
+    /**
+     * Sets the Anthropic API key. Blank values are stored as null.
+     *
+     * @param anthropicApiKey The key, or null to remove it
+     */
+    public void setAnthropicApiKey(String anthropicApiKey) {
+        this.anthropicApiKey = anthropicApiKey == null || anthropicApiKey.isBlank() ? null : anthropicApiKey.trim();
+    }
+
+    /**
+     * Checks whether an Anthropic API key is stored in the settings.
+     *
+     * @return true if a key was entered in Settings
+     */
+    public boolean hasAnthropicApiKey() {
+        return anthropicApiKey != null;
+    }
+
     /**
      * Validates if the settings are complete and valid for use.
      * 

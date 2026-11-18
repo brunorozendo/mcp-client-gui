@@ -2,6 +2,7 @@ package com.brunorozendo.mcpclientgui.service;
 
 import com.brunorozendo.mcpclientgui.model.AppSettings;
 import com.brunorozendo.mcpclientgui.model.Chat;
+import com.brunorozendo.mcpclientgui.model.LlmProvider;
 import com.brunorozendo.mcpclientgui.model.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +34,11 @@ public class DatabaseService {
     private static final String SQLITE_DRIVER_CLASS = "org.sqlite.JDBC";
     
     // Default values
-    private static final String DEFAULT_MODEL_NAME = "qwen3:14b";
+    private static final String DEFAULT_MODEL_NAME = LlmProvider.DEFAULT_ANTHROPIC_MODEL_NAME;
+    
+    // Schema versions tracked in PRAGMA user_version.
+    // 1: the Anthropic default model was added and made the default once.
+    private static final int SCHEMA_VERSION_ANTHROPIC_DEFAULT = 1;
     
     // Singleton instance
     private static DatabaseService instance;
@@ -46,7 +51,17 @@ public class DatabaseService {
      * Private constructor for singleton pattern.
      */
     private DatabaseService() {
-        this.databasePath = createDatabasePath();
+        this(createDatabasePath());
+    }
+
+    /**
+     * Opens (and creates or migrates) the database at the given path.
+     * Package-private so tests can run against a temporary database file.
+     *
+     * @param databasePath The absolute path of the SQLite database file
+     */
+    DatabaseService(String databasePath) {
+        this.databasePath = databasePath;
         initializeDatabase();
     }
 
@@ -67,7 +82,7 @@ public class DatabaseService {
      * 
      * @return The absolute path to the database file
      */
-    private String createDatabasePath() {
+    private static String createDatabasePath() {
         String userHome = System.getProperty("user.home");
         File databaseDirectory = new File(userHome, DATABASE_DIRECTORY);
         
@@ -142,13 +157,93 @@ public class DatabaseService {
      * @throws SQLException if migration fails
      */
     private void performDataMigrations() throws SQLException {
-        if (!needsMigration()) {
+        if (needsMigration()) {
+            String oldModelName = getOldModelName();
+            if (oldModelName != null && !oldModelName.trim().isEmpty()) {
+                migrateToNewModelFormat(oldModelName);
+            }
+        }
+        
+        ensureAnthropicApiKeyColumn();
+        migrateToAnthropicDefault();
+    }
+    
+    /**
+     * Adds the anthropic_api_key column to app_settings tables created before it existed.
+     *
+     * @throws SQLException if the check or the ALTER TABLE fails
+     */
+    private void ensureAnthropicApiKeyColumn() throws SQLException {
+        boolean hasColumn = false;
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.SETTINGS_TABLE_INFO)) {
+            while (resultSet.next()) {
+                if ("anthropic_api_key".equalsIgnoreCase(resultSet.getString("name"))) {
+                    hasColumn = true;
+                }
+            }
+        }
+        
+        if (!hasColumn) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(DatabaseQueries.ADD_ANTHROPIC_API_KEY_COLUMN);
+            }
+            logger.info("Added anthropic_api_key column to app_settings");
+        }
+    }
+    
+    /**
+     * One-time migration (schema version 1): adds the default Anthropic model to llm_models and makes it
+     * the default model. It is recorded in PRAGMA user_version, so it never runs again, even after the
+     * user picks another default. Chats keep their models; Ollama models are left in place.
+     *
+     * @throws SQLException if the migration fails (it is rolled back)
+     */
+    private void migrateToAnthropicDefault() throws SQLException {
+        if (getSchemaVersion() >= SCHEMA_VERSION_ANTHROPIC_DEFAULT) {
             return;
         }
         
-        String oldModelName = getOldModelName();
-        if (oldModelName != null && !oldModelName.trim().isEmpty()) {
-            migrateToNewModelFormat(oldModelName);
+        connection.setAutoCommit(false);
+        try {
+            try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.INSERT_MODEL_IF_NOT_EXISTS)) {
+                statement.setString(1, DEFAULT_MODEL_NAME);
+                statement.setBoolean(2, true);
+                statement.executeUpdate();
+            }
+            clearAllDefaultModels();
+            setModelAsDefault(DEFAULT_MODEL_NAME);
+            
+            // No-op when the settings row does not exist yet; AppSettings then defaults to the same model.
+            try (PreparedStatement statement = connection.prepareStatement(DatabaseQueries.UPDATE_DEFAULT_MODEL_NAME)) {
+                statement.setString(1, DEFAULT_MODEL_NAME);
+                statement.executeUpdate();
+            }
+            
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(DatabaseQueries.SET_SCHEMA_VERSION_PREFIX + SCHEMA_VERSION_ANTHROPIC_DEFAULT);
+            }
+            connection.commit();
+            logger.info("Made '{}' the default model (schema version {})",
+                        DEFAULT_MODEL_NAME, SCHEMA_VERSION_ANTHROPIC_DEFAULT);
+        } catch (SQLException e) {
+            connection.rollback();
+            throw e;
+        } finally {
+            resetAutoCommit();
+        }
+    }
+    
+    /**
+     * Reads the schema version stored in PRAGMA user_version (0 for databases that never set it).
+     *
+     * @return The schema version
+     * @throws SQLException if the query fails
+     */
+    int getSchemaVersion() throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(DatabaseQueries.SELECT_SCHEMA_VERSION)) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
         }
     }
     
@@ -671,6 +766,7 @@ public class DatabaseService {
         
         settings.setOllamaBaseUrl(resultSet.getString("ollama_base_url"));
         settings.setDefaultLlmModelName(resultSet.getString("default_llm_model_name"));
+        settings.setAnthropicApiKey(resultSet.getString("anthropic_api_key"));
     }
     
     /**
@@ -757,6 +853,7 @@ public class DatabaseService {
             settings.getMcpConfigFile().getAbsolutePath() : null);
         statement.setString(2, settings.getOllamaBaseUrl());
         statement.setString(3, settings.getDefaultLlmModelName());
+        statement.setString(4, settings.getAnthropicApiKey());
     }
     
     /**

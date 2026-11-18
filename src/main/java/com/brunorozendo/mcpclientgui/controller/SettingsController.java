@@ -1,6 +1,7 @@
 package com.brunorozendo.mcpclientgui.controller;
 
 import com.brunorozendo.mcpclientgui.model.AppSettings;
+import com.brunorozendo.mcpclientgui.model.LlmProvider;
 import com.brunorozendo.mcpclientgui.service.DatabaseService;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -26,6 +27,7 @@ import java.util.List;
  * - Language Learning Model (LLM) configuration
  * - MCP configuration file path
  * - Ollama API base URL
+ * - Anthropic API key (write-only: a saved key is never put back into the field)
  */
 public class SettingsController {
     
@@ -36,6 +38,9 @@ public class SettingsController {
     private static final String DEFAULT_INDICATOR = "Yes";
     private static final String MODEL_EXISTS_WARNING = "Model '%s' already exists!";
     private static final int BUTTON_SPACING = 5;
+    private static final String API_KEY_PROMPT_SAVED = "A key is saved. Type a new key to replace it.";
+    private static final String API_KEY_PROMPT_EMPTY = "Not set: ANTHROPIC_API_KEY from the environment is used";
+    private static final String API_KEY_PROMPT_REMOVED = "The saved key will be removed when you click Save";
     
     // FXML UI Components
     @FXML private TextField newModelField;
@@ -47,12 +52,15 @@ public class SettingsController {
     @FXML private TextField mcpConfigPathField;
     @FXML private Button browseMcpConfigButton;
     @FXML private TextField ollamaBaseUrlField;
+    @FXML private PasswordField anthropicApiKeyField;
+    @FXML private Button clearAnthropicApiKeyButton;
     @FXML private Button saveButton;
     @FXML private Button cancelButton;
 
     // State management
     private AppSettings settings;
     private boolean saved = false;
+    private boolean removeSavedApiKey = false;
     private Stage dialogStage;
     private final DatabaseService databaseService = DatabaseService.getInstance();
     private final ObservableList<ModelEntry> modelsList = FXCollections.observableArrayList();
@@ -143,6 +151,30 @@ public class SettingsController {
         populateModelsTable();
         updateMcpConfigPath();
         updateOllamaUrl();
+        updateAnthropicApiKeyField();
+    }
+    
+    /**
+     * Prepares the API key field. The saved key itself is never loaded into the UI: the field stays
+     * empty and its prompt says whether a key is saved.
+     */
+    private void updateAnthropicApiKeyField() {
+        anthropicApiKeyField.clear();
+        removeSavedApiKey = false;
+        boolean hasKey = settings.hasAnthropicApiKey();
+        anthropicApiKeyField.setPromptText(hasKey ? API_KEY_PROMPT_SAVED : API_KEY_PROMPT_EMPTY);
+        clearAnthropicApiKeyButton.setDisable(!hasKey);
+    }
+    
+    /**
+     * Marks the saved Anthropic API key for removal (applied on Save).
+     */
+    @FXML
+    private void handleClearAnthropicApiKey() {
+        anthropicApiKeyField.clear();
+        removeSavedApiKey = true;
+        anthropicApiKeyField.setPromptText(API_KEY_PROMPT_REMOVED);
+        clearAnthropicApiKeyButton.setDisable(true);
     }
     
     /**
@@ -362,6 +394,15 @@ public class SettingsController {
         // Update other settings
         settings.setOllamaBaseUrl(ollamaBaseUrlField.getText().trim());
         
+        // A typed key replaces the saved one; an empty field keeps it unless removal was requested
+        String typedKey = anthropicApiKeyField.getText();
+        if (typedKey != null && !typedKey.isBlank()) {
+            settings.setAnthropicApiKey(typedKey);
+        } else if (removeSavedApiKey) {
+            settings.setAnthropicApiKey(null);
+        }
+        anthropicApiKeyField.clear();
+        
         String mcpConfigPath = mcpConfigPathField.getText().trim();
         if (!mcpConfigPath.isEmpty()) {
             settings.setMcpConfigFile(new File(mcpConfigPath));
@@ -438,7 +479,10 @@ public class SettingsController {
      * Validates Ollama URL.
      */
     private void validateOllamaUrl(List<String> errors) {
-        if (ollamaBaseUrlField.getText().trim().isEmpty()) {
+        // Only Ollama models need the URL; an Anthropic-only setup can leave it empty.
+        boolean hasOllamaModel = modelsList.stream()
+            .anyMatch(m -> LlmProvider.of(m.getName()) == LlmProvider.OLLAMA);
+        if (hasOllamaModel && ollamaBaseUrlField.getText().trim().isEmpty()) {
             errors.add("Ollama Base URL is required");
         }
     }

@@ -14,6 +14,7 @@ module com.brunorozendo.mcpclientgui {
     requires java.sql;
     requires org.xerial.sqlitejdbc;
     requires org.commonmark;
+    requires com.anthropic;
 
     opens com.brunorozendo.mcpclientgui to javafx.fxml;
     opens com.brunorozendo.mcpclientgui.controller to javafx.fxml;

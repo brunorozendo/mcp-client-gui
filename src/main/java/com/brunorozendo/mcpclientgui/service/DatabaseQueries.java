@@ -36,6 +36,7 @@ class DatabaseQueries {
             mcp_config_file TEXT,
             ollama_base_url TEXT,
             default_llm_model_name TEXT,
+            anthropic_api_key TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """;
@@ -96,15 +97,16 @@ class DatabaseQueries {
     // ===== Settings Queries =====
     
     static final String SELECT_SETTINGS = 
-        "SELECT mcp_config_file, ollama_base_url, default_llm_model_name FROM app_settings WHERE id = 1";
+        "SELECT mcp_config_file, ollama_base_url, default_llm_model_name, anthropic_api_key " +
+        "FROM app_settings WHERE id = 1";
     
     static final String UPDATE_SETTINGS = 
         "UPDATE app_settings SET mcp_config_file = ?, ollama_base_url = ?, " +
-        "default_llm_model_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1";
+        "default_llm_model_name = ?, anthropic_api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1";
     
     static final String INSERT_SETTINGS = 
-        "INSERT INTO app_settings (id, mcp_config_file, ollama_base_url, default_llm_model_name) " +
-        "VALUES (1, ?, ?, ?)";
+        "INSERT INTO app_settings (id, mcp_config_file, ollama_base_url, default_llm_model_name, anthropic_api_key) " +
+        "VALUES (1, ?, ?, ?, ?)";
     
     static final String COUNT_SETTINGS = 
         "SELECT COUNT(*) FROM app_settings WHERE id = 1";
@@ -122,6 +124,19 @@ class DatabaseQueries {
     
     static final String UPDATE_DEFAULT_MODEL_NAME = 
         "UPDATE app_settings SET default_llm_model_name = ? WHERE id = 1";
+    
+    static final String SETTINGS_TABLE_INFO = 
+        "PRAGMA table_info(app_settings)";
+    
+    static final String ADD_ANTHROPIC_API_KEY_COLUMN = 
+        "ALTER TABLE app_settings ADD COLUMN anthropic_api_key TEXT";
+    
+    static final String SELECT_SCHEMA_VERSION = 
+        "PRAGMA user_version";
+    
+    // PRAGMA does not take bound parameters; the version is appended by the caller.
+    static final String SET_SCHEMA_VERSION_PREFIX = 
+        "PRAGMA user_version = ";
     
     // Private constructor to prevent instantiation
     private DatabaseQueries() {}

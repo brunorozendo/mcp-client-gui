@@ -34,25 +34,37 @@ public class ToolExecutor {
         private final String output;
         private final boolean success;
         private final String toolName;
+        private final boolean toolReportedError;
         
-        private ToolResult(String toolName, String output, boolean success) {
+        private ToolResult(String toolName, String output, boolean success, boolean toolReportedError) {
             this.toolName = toolName;
             this.output = output;
             this.success = success;
+            this.toolReportedError = toolReportedError;
         }
         
         public static ToolResult success(String toolName, String output) {
-            return new ToolResult(toolName, output, true);
+            return new ToolResult(toolName, output, true, false);
         }
         
         public static ToolResult error(String toolName, String errorMessage) {
             return new ToolResult(toolName, 
-                String.format(ERROR_FORMAT, toolName, errorMessage), false);
+                String.format(ERROR_FORMAT, toolName, errorMessage), false, false);
+        }
+        
+        /**
+         * A call that ran, but whose MCP result was flagged {@code isError}. It counts as a success for
+         * {@link #isSuccess()} (as before), and {@link #isToolReportedError()} tells callers that can
+         * report tool errors (Anthropic {@code is_error}) about it.
+         */
+        static ToolResult toolReportedError(String toolName, String output) {
+            return new ToolResult(toolName, output, true, true);
         }
         
         public String getOutput() { return output; }
         public boolean isSuccess() { return success; }
         public String getToolName() { return toolName; }
+        public boolean isToolReportedError() { return toolReportedError; }
     }
     
     /**
@@ -82,9 +94,18 @@ public class ToolExecutor {
             return ToolResult.error("unknown", "Tool call has no function");
         }
         
-        String toolName = function.name();
-        Map<String, Object> arguments = function.arguments();
-        
+        return execute(function.name(), function.arguments());
+    }
+    
+    /**
+     * Executes a tool by name with already-parsed arguments.
+     * Used by both providers: Ollama through {@link #execute(OllamaApi.ToolCall)}, Anthropic directly.
+     * 
+     * @param toolName The name of the MCP tool
+     * @param arguments The tool arguments (null is reported as an error)
+     * @return The execution result
+     */
+    public ToolResult execute(String toolName, Map<String, Object> arguments) {
         logger.info("Executing tool: {} with args: {}", toolName, arguments);
         
         // Validate arguments
@@ -101,6 +122,9 @@ public class ToolExecutor {
             String formattedResult = formatToolResult(toolName, mcpResult);
             
             logger.info("Tool '{}' executed successfully", toolName);
+            if (mcpResult != null && Boolean.TRUE.equals(mcpResult.isError())) {
+                return ToolResult.toolReportedError(toolName, formattedResult);
+            }
             return ToolResult.success(toolName, formattedResult);
             
         } catch (Exception e) {
