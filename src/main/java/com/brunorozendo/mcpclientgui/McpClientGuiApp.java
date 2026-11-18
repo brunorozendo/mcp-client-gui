@@ -104,16 +104,26 @@ public class McpClientGuiApp extends Application {
 
     /**
      * Called when the application is stopping.
-     * Ensures proper cleanup of resources, particularly the database connection.
-     * 
-     * @throws Exception If an error occurs during shutdown
+     * Ensures proper cleanup of resources, particularly the database connection,
+     * then ends the JVM (status 0 on success, 1 if the cleanup failed).
      */
     @Override
-    public void stop() throws Exception {
+    public void stop() {
         logger.info("Application shutting down...");
-        DatabaseService.getInstance().close();
-        super.stop();
-        logger.info("Application shutdown complete");
+        int exitStatus = 1;
+        try {
+            DatabaseService.getInstance().close();
+            super.stop();
+            logger.info("Application shutdown complete");
+            exitStatus = 0;
+        } catch (Exception e) {
+            logger.error("Error during application shutdown", e);
+        } finally {
+            // Exit here instead of returning to the JavaFX launcher: on macOS its toolkit
+            // termination races InvokeLaterDispatcher, which can submit a runnable after the
+            // AppKit thread is detached and print "Main Java thread is detached".
+            System.exit(exitStatus);
+        }
     }
 
     /**
